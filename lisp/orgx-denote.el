@@ -32,6 +32,9 @@
 (declare-function denote-journal-capture-entry-for-date "denote-journal-capture")
 (declare-function denote-journal-capture-timestamp "denote-journal-capture")
 
+(declare-function orgx-skip-unless-open-question "orgx")
+
+(defvar org-agenda-custom-commands)
 (defvar denote-last-path)
 (defvar org-done-keywords)
 (defvar org-state)
@@ -190,6 +193,66 @@ signature, and formats the sequence category."
   (interactive)
   (let ((org-agenda-files (orgx-denote-completed-plan-files)))
     (org-tags-view t "+TODO=\"DONE\"|+TODO=\"CANCELLED\"")))
+
+(defconst orgx-denote-agenda-commands
+  `(("d" . "denote database files")
+    ("da" "Denote Agenda" todo ""
+     ,(orgx-denote-agenda-settings "Denote Agenda: All"))
+    ("dt" "Denote Agenda Tasks (without agent or questions)"
+     ((tags-todo "-agent-question-TODO=\"QUESTION\""
+                 ((org-agenda-overriding-header "Denote Agenda"))))
+     ,(orgx-denote-agenda-settings "Denote Agenda: Tasks"))
+    ("dn" "Denote Agenda (without agent)"
+     ((tags-todo "-agent"
+                 ((org-agenda-overriding-header "Denote (non) Agent Tasks"))))
+     ,(orgx-denote-agenda-settings "Denote Agenda: Non-agent tasks"))
+    ("dg" "Denote Agenda (agent only)"
+     ((tags-todo "+agent-question-TODO=\"QUESTION\""
+                 ((org-agenda-overriding-header "Denote Agent Tasks"))))
+     ,(orgx-denote-agenda-settings "Denote Agenda: Agent tasks"))
+    ("dq" "Human Questions"
+     ((tags "+question|TODO=\"QUESTION\""
+            ((org-agenda-skip-function #'orgx-skip-unless-open-question)
+             (org-agenda-overriding-header "Human Questions"))))
+     ,(orgx-denote-agenda-settings nil))
+    ("dc" "Denote Composite Agenda"
+     ((tags "+question|TODO=\"QUESTION\""
+            ((org-agenda-skip-function #'orgx-skip-unless-open-question)
+             (org-agenda-overriding-header "Human questions")))
+      (tags-todo "TODO=\"CONSIDER\"|TODO=\"MUST\""
+                 ((org-agenda-overriding-header "Pending Considerations")))
+      (tags-todo "TODO=\"INPROGRESS\"|TODO=\"PAUSED\"|TODO=\"SCHEDULED\"|TODO=\"BLOCKED\""
+                 ((org-agenda-overriding-header "Active Tasks")))
+      (tags-todo "-agent-question-TODO=\"QUESTION\""
+                 ((org-agenda-overriding-header "Tasks")))
+      (tags-todo "+agent-question-TODO=\"QUESTION\"-TODO=\"CONSIDER\"-TODO=\"MUST\"-TODO=\"INPROGRESS\"-TODO=\"PAUSED\"-TODO=\"SCHEDULED\"-TODO=\"BLOCKED\""
+                 ((org-agenda-overriding-header "Agent tasks"))))
+     ,(orgx-denote-agenda-settings nil '(orgx-denote-composite-files)))
+    ("dx" "Completed Plans"
+     ((tags "+question|TODO=\"QUESTION\""
+            ((org-agenda-skip-function #'orgx-skip-unless-open-question)
+             (org-agenda-overriding-header "Open Questions in Completed Plans")))
+      (tags-todo "TODO=\"INPROGRESS\"|TODO=\"PAUSED\"|TODO=\"SCHEDULED\"|TODO=\"BLOCKED\""
+                 ((org-agenda-overriding-header "Active/Incomplete Tasks in Completed Plans")))
+      (tags-todo "-agent-question-TODO=\"QUESTION\""
+                 ((org-agenda-overriding-header "Tasks in Completed Plans")))
+      (tags-todo "+agent-question-TODO=\"QUESTION\""
+                 ((org-agenda-overriding-header "Agent Tasks in Completed Plans")))
+      (tags "TODO=\"DONE\"|TODO=\"ANSWERED\"|TODO=\"COMPLETE\"|TODO=\"CANCELED\"|TODO=\"ABANDONED\""
+            ((org-agenda-overriding-header "Completed Tasks in Completed Plans"))))
+     ,(orgx-denote-agenda-settings "Completed Plans" '(orgx-denote-completed-plan-files))))
+  "List of Denote agenda commands for `org-agenda-custom-commands'.")
+
+;;;###autoload
+(defun orgx-denote-setup-agenda-commands ()
+  "Register Denote custom commands into `org-agenda-custom-commands'."
+  (interactive)
+  (when (boundp 'org-agenda-custom-commands)
+    (dolist (cmd orgx-denote-agenda-commands)
+      (setq org-agenda-custom-commands
+            (cons cmd (seq-remove (lambda (c) (equal (car c) (car cmd)))
+                                  org-agenda-custom-commands))))))
+
 
 ;;; Subtree migration
 

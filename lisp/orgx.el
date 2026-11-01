@@ -39,6 +39,12 @@
 (declare-function consult-org-heading "consult")
 (declare-function agent-shell-queue-org-refile-from-heading "agent-shell-queue-org")
 
+(declare-function windmove-up "windmove")
+(declare-function windmove-down "windmove")
+(declare-function windmove-left "windmove")
+(declare-function windmove-right "windmove")
+(declare-function orgx-denote-setup-agenda-commands "orgx-denote")
+
 (declare-function orgx-capture "orgx-capture")
 (declare-function orgx-capture-reset-templates "orgx-capture")
 (declare-function orgx-capture-add-project-file-templates "orgx-capture")
@@ -507,24 +513,50 @@ When optional TAG is supplied, search for that tag instead."
 (keymap-set orgx-minor-mode-map "C-c o" orgx-minor-mode-commands-map)
 
 (defun orgx--set-up-buffer ()
-  "Configure buffer settings for `orgx-minor-mode'."
+  "Configure buffer settings for `orgx-mode'."
   (setq-local fill-column 72)
+  (setq-local org-return-follows-link t)
+  (setq-local org-use-speed-commands #'orgx--use-speed-commands)
+  (add-hook 'org-ctrl-c-ctrl-c-hook #'orgx-set-weekday-of-timestamp nil t)
+  (add-hook 'org-after-todo-state-change-hook #'orgx-enforce-question-answered nil t)
+  (when (fboundp 'windmove-up)
+    (add-hook 'org-shiftup-final-hook #'windmove-up nil t)
+    (add-hook 'org-shiftleft-final-hook #'windmove-left nil t)
+    (add-hook 'org-shiftdown-final-hook #'windmove-down nil t)
+    (add-hook 'org-shiftright-final-hook #'windmove-right nil t))
   (when (fboundp 'toc-org-mode)
     (add-hook 'before-save-hook #'whitespace-cleanup nil t)))
 
+(defun orgx--tear-down-buffer ()
+  "Tear down buffer settings for `orgx-mode'."
+  (remove-hook 'org-ctrl-c-ctrl-c-hook #'orgx-set-weekday-of-timestamp t)
+  (remove-hook 'org-after-todo-state-change-hook #'orgx-enforce-question-answered t)
+  (remove-hook 'org-shiftup-final-hook #'windmove-up t)
+  (remove-hook 'org-shiftleft-final-hook #'windmove-left t)
+  (remove-hook 'org-shiftdown-final-hook #'windmove-down t)
+  (remove-hook 'org-shiftright-final-hook #'windmove-right t)
+  (remove-hook 'before-save-hook #'whitespace-cleanup t))
+
 ;;;###autoload
-(define-minor-mode orgx-minor-mode
+(define-minor-mode orgx-mode
   "Personal org-mode keybindings and buffer setup.
 Activates `orgx-minor-mode-commands-map' under C-c o."
   :lighter " ox"
   :keymap orgx-minor-mode-map
-  (when orgx-minor-mode
-    (orgx--set-up-buffer)))
+  (if orgx-mode
+      (orgx--set-up-buffer)
+    (orgx--tear-down-buffer)))
 
 ;;;###autoload
-(defun orgx-minor-mode-turn-on ()
-  "Enable `orgx-minor-mode' in the current buffer."
-  (orgx-minor-mode 1))
+(defalias 'orgx-minor-mode #'orgx-mode)
+
+;;;###autoload
+(defun orgx-mode-turn-on ()
+  "Enable `orgx-mode' in the current buffer."
+  (orgx-mode 1))
+
+;;;###autoload
+(defalias 'orgx-minor-mode-turn-on #'orgx-mode-turn-on)
 
 ;;; orgx-agenda-minor-mode
 
@@ -564,6 +596,14 @@ Activates `orgx-minor-mode-commands-map' under C-c o."
 (defalias 'orgx-agenda-denote-questions #'orgx-denote-agenda-questions)
 (defalias 'orgx-agenda-denote-composite #'orgx-denote-agenda-composite)
 (defalias 'orgx-agenda-denote-completed-plans #'orgx-denote-agenda-completed-plans)
+
+;;;###autoload
+(defun orgx-setup ()
+  "Centrally initialize and wire orgx features, templates, and agenda integration."
+  (interactive)
+  (orgx-setup-standard-capture-templates)
+  (when (require 'orgx-denote nil t)
+    (orgx-denote-setup-agenda-commands)))
 
 (provide 'orgx)
 ;;; orgx.el ends here

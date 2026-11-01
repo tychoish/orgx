@@ -54,3 +54,16 @@
 
 (provide 'orgx-denote-test)
 ;;; orgx-denote-test.el ends here
+
+(ert-deftest orgx-denote-setup-agenda-commands-test ()
+  "Test registering denote commands into `org-agenda-custom-commands'."
+  (let ((org-agenda-custom-commands nil))
+    (orgx-denote-setup-agenda-commands)
+    (should (assoc "d" org-agenda-custom-commands))
+    (should (assoc "da" org-agenda-custom-commands))
+    (should (assoc "dt" org-agenda-custom-commands))
+    (should (assoc "dn" org-agenda-custom-commands))
+    (should (assoc "dg" org-agenda-custom-commands))
+    (should (assoc "dq" org-agenda-custom-commands))
+    (should (assoc "dc" org-agenda-custom-commands))
+    (should (assoc "dx" org-agenda-custom-commands))))

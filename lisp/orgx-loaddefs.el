@@ -38,28 +38,30 @@ When optional TAG is supplied, search for that tag instead.
 "Switch to an agenda buffer or other Org file using completing-read." t)
 (autoload 'orgx-find-heading "orgx"
 "Jump to any heading across all `org-agenda-files' using completing-read." t)
-(autoload 'orgx-minor-mode "orgx"
+(autoload 'orgx-mode "orgx"
 "Personal org-mode keybindings and buffer setup.
 
 Activates `orgx-minor-mode-commands-map' under C-c o.
 
-This is a minor mode.  If called interactively, toggle the `Orgx minor
-mode' mode.  If the prefix argument is positive, enable the mode, and if
-it is zero or negative, disable the mode.
+This is a minor mode.  If called interactively, toggle the `Orgx mode'
+mode.  If the prefix argument is positive, enable the mode, and if it is
+zero or negative, disable the mode.
 
 If called from Lisp, toggle the mode if ARG is `toggle'.  Enable the
 mode if ARG is nil, omitted, or is a positive number.  Disable the mode
 if ARG is a negative number.
 
 To check whether the minor mode is enabled in the current buffer,
-evaluate the variable `orgx-minor-mode'.
+evaluate the variable `orgx-mode'.
 
 The mode's hook is called both when the mode is enabled and when it is
 disabled.
 
 (fn &optional ARG)" t)
-(autoload 'orgx-minor-mode-turn-on "orgx"
-"Enable `orgx-minor-mode' in the current buffer.")
+(defalias 'orgx-minor-mode #'orgx-mode)
+(autoload 'orgx-mode-turn-on "orgx"
+"Enable `orgx-mode' in the current buffer.")
+(defalias 'orgx-minor-mode-turn-on #'orgx-mode-turn-on)
 (autoload 'orgx-agenda-minor-mode "orgx"
 "Personal org-agenda keybindings and setup.
 
@@ -80,6 +82,8 @@ disabled.
 (fn &optional ARG)" t)
 (autoload 'orgx-agenda-minor-mode-turn-on "orgx"
 "Enable `orgx-agenda-minor-mode' in the current buffer.")
+(autoload 'orgx-setup "orgx"
+"Centrally initialize and wire orgx features, templates, and agenda integration." t)
 (register-definition-prefixes "orgx" '("orgx-"))
 
 
@@ -137,6 +141,8 @@ window.  If it is hidden or not active, display it in the bottom popup window." 
 "Show composite denote agenda, suppressing closed/completed notes." t)
 (autoload 'orgx-denote-agenda-completed-plans "orgx-denote"
 "Show all items from completed plans across the denote tree." t)
+(autoload 'orgx-denote-setup-agenda-commands "orgx-denote"
+"Register Denote custom commands into `org-agenda-custom-commands'." t)
 (autoload 'orgx-denote-migrate-subtree "orgx-denote"
 "Extract the current Org subtree to a new denote note.
 Replaces the original heading with a denote link to the newly created note.
