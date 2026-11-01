@@ -590,6 +590,7 @@ Activates `orgx-minor-mode-commands-map' under C-c o."
 (defalias 'orgx-reset-capture-templates #'orgx-capture-reset-templates)
 (defalias 'orgx-add-project-file-capture-templates #'orgx-capture-add-project-file-templates)
 (defalias 'orgx-setup-standard-capture-templates #'orgx-capture-setup-standard-templates)
+(defalias 'orgx--setup-standard-capture-templates #'orgx-setup-standard-capture-templates)
 (defalias 'orgx-migrate-subtree-to-denote #'orgx-denote-migrate-subtree)
 (defalias 'orgx-refile-to-denote #'orgx-denote-migrate-subtree)
 (defalias 'orgx-agenda-denote-todos #'orgx-denote-agenda-todos)
