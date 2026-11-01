@@ -61,34 +61,42 @@ Org mode extensions, structured capture templates, continuous REPL capture shell
 
 * Building & Testing
 
-All actions can be invoked directly with standard tools or via the helper scripts under =scripts/=:
+The repository relies on zero ad-hoc shell scripts. All operations run directly in Emacs via ~builder.el~ or via standard underlying command-line tools.
 
-** Emacs Lisp
-- Byte-compile:
+** In Emacs (via ~builder.el~)
+- ~M-x builder~ or ~(builder-select)~ discovers all project candidates interactively.
+- Centralized programmatic execution via ~(builder-select <target> :force t)~:
+  - =(builder-select 'test :force t)= :: Runs the active test suite (e.g., workspace cargo test or ERT tests).
+  - =(builder-select 'build :force t)= :: Runs the workspace build.
+  - =(builder-select 'clippy :force t)= :: Runs clippy linting across workspace crates.
+  - =(builder-select 'rust-test-workspace :force t)= :: Runs specific target symbol.
+- MCP client & Agent integration:
+  - ~discover_tasks~ returns structured candidates with stable =:id= and =:action= tags.
+  - ~run_task(target="test")~ or ~run_task(id="rust-test-workspace")~ executes compilation without prompts.
+
+** From Command Line (Direct Tooling)
+- *Generate Autoloads*:
   #+begin_src bash
-  ./scripts/compile-elisp.sh
-  # or directly:
+  emacs -Q --batch --eval '(loaddefs-generate "lisp" "lisp/orgx-loaddefs.el")'
+  #+end_src
+- *Byte-compile Elisp*:
+  #+begin_src bash
   emacs -Q --batch -L lisp -f batch-byte-compile lisp/*.el
   #+end_src
-- ERT Tests:
+- *Run ERT Unit Tests*:
   #+begin_src bash
-  ./scripts/test-elisp.sh
-  # or directly:
-  emacs -Q --batch -L lisp -L test -l ert -f ert-run-tests-batch-and-exit
+  emacs -Q --batch -L lisp -L test \
+    -l test/orgx-test.el \
+    -l test/orgx-capture-test.el \
+    -l test/orgx-capture-shell-test.el \
+    -l test/orgx-denote-test.el \
+    -f ert-run-tests-batch-and-exit
   #+end_src
-
-** Rust CLI
-- Build binary:
+- *Cargo Workspace (Rust)*:
   #+begin_src bash
-  ./scripts/build-cli.sh
-  # or directly:
-  cargo build --release -p orgx-cli
-  #+end_src
-- Test:
-  #+begin_src bash
-  ./scripts/test-cli.sh
-  # or directly:
+  cargo check --workspace
   cargo test --workspace
+  cargo build --workspace --release
   #+end_src
 
 * License
