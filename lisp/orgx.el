@@ -163,6 +163,8 @@ Updates `local-notes-directory', `org-directory', `org-agenda-files',
                                       (seq-remove #'string-empty-p)
                                       (seq-uniq)))
   (setq org-annotate-file-storage-file (file-name-concat org-directory "records.org"))
+  (setq org-default-notes-file (file-name-concat org-directory "records.org"))
+  (setq org-archive-location (file-name-concat org-directory "archive/%s::datetree/"))
   (setq deft-directory (file-name-concat local-notes-directory "deft"))
   (setq denote-directory (file-name-concat local-notes-directory "denote"))
   local-notes-directory)

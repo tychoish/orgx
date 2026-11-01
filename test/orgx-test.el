@@ -156,6 +156,8 @@
     (should (equal org-directory (expand-file-name "/tmp/test-notes/org")))
     (should (member (expand-file-name "/tmp/test-notes/org") org-agenda-files))
     (should (equal org-annotate-file-storage-file (expand-file-name "/tmp/test-notes/org/records.org")))
+    (should (equal org-default-notes-file (expand-file-name "/tmp/test-notes/org/records.org")))
+    (should (equal org-archive-location (expand-file-name "/tmp/test-notes/org/archive/%s::datetree/")))
     (should (equal deft-directory (expand-file-name "/tmp/test-notes/deft")))
     (should (equal denote-directory (expand-file-name "/tmp/test-notes/denote")))
     ;; Also verify bootstrap-set-notes-directory alias works
