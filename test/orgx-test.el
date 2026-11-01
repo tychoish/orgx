@@ -70,40 +70,40 @@
 (ert-deftest orgx-gist-keymap-test ()
   "Test that orgx-gist-map is mounted under C-c o g."
   (should (keymapp orgx-gist-map))
-  (should (eq orgx-gist-map (keymap-lookup orgx-commands-map "g")))
+  (should (eq orgx-gist-map (keymap-lookup orgx-command-map "g")))
   (should (commandp (keymap-lookup orgx-gist-map "p")))
   (should (commandp (keymap-lookup orgx-gist-map "g"))))
-
-(ert-deftest orgx-minor-mode-aliases-test ()
-  "Test compatibility aliases for orgx-minor-mode."
-  (should (eq orgx-minor-mode-map orgx-mode-map))
-  (should (eq orgx-minor-mode-commands-map orgx-commands-map))
-  (should (eq orgx-minor-mode-archive-map orgx-archive-map))
-  (should (eq orgx-minor-mode-capture-map orgx-capture-map))
-  (should (eq orgx-minor-mode-link-map orgx-link-map))
-  (should (eq orgx-global-map orgx-commands-map)))
 
 (ert-deftest orgx-link-keymap-test ()
   "Test that orgx-link-map is mounted under C-c o l."
   (should (keymapp orgx-link-map))
-  (should (eq orgx-link-map (keymap-lookup orgx-commands-map "l")))
+  (should (eq orgx-link-map (keymap-lookup orgx-command-map "l")))
   (should (commandp (keymap-lookup orgx-link-map "s")))
   (should (commandp (keymap-lookup orgx-link-map "a")))
   (should (commandp (keymap-lookup orgx-link-map "i")))
   (should (commandp (keymap-lookup orgx-link-map "n"))))
 
-(ert-deftest orgx-global-keymap-reconciled-test ()
-  "Test that all reconciled hud-mode keys exist in orgx-commands-map / orgx-global-map."
-  (should (eq #'org-agenda (keymap-lookup orgx-global-map "4")))
-  (should (eq #'org-capture (keymap-lookup orgx-global-map "k")))
-  (should (eq #'org-save-all-org-buffers (keymap-lookup orgx-global-map "s")))
-  (should (eq #'orgx-agenda-view (keymap-lookup orgx-global-map "a")))
-  (should (eq #'orgx-agenda-files-reload (keymap-lookup orgx-global-map "r")))
-  (should (eq #'orgx-agenda-files-open (keymap-lookup orgx-global-map "f")))
-  (should (eq #'orgx-capture (keymap-lookup orgx-global-map "j")))
-  (should (eq #'orgx-agenda-for-file (keymap-lookup orgx-global-map "/")))
-  (should (eq #'orgx-capture-shell-toggle (keymap-lookup orgx-global-map "C-s")))
-  (should (eq #'orgx-capture-shell-transient (keymap-lookup orgx-global-map "C-t"))))
+(ert-deftest orgx-mode-keymaps-test ()
+  "Test that orgx-mode-map and orgx-global-mode-map mount orgx-command-map on C-c o."
+  (should (keymapp orgx-command-map))
+  (should (keymapp orgx-mode-map))
+  (should (keymapp orgx-global-mode-map))
+  (should (eq orgx-command-map (keymap-lookup orgx-mode-map "C-c o")))
+  (should (eq orgx-command-map (keymap-lookup orgx-global-mode-map "C-c o"))))
+
+(ert-deftest orgx-command-map-keys-test ()
+  "Test that all canonical command keys exist in orgx-command-map."
+  (should (eq #'org-agenda (keymap-lookup orgx-command-map "4")))
+  (should (eq #'org-capture (keymap-lookup orgx-command-map "k")))
+  (should (eq #'org-save-all-org-buffers (keymap-lookup orgx-command-map "s")))
+  (should (eq #'orgx-agenda-view (keymap-lookup orgx-command-map "a")))
+  (should (eq #'orgx-agenda-files-reload (keymap-lookup orgx-command-map "r")))
+  (should (eq #'orgx-agenda-files-open (keymap-lookup orgx-command-map "f")))
+  (should (eq #'orgx-agenda-files-open (keymap-lookup orgx-command-map "o")))
+  (should (eq #'orgx-capture (keymap-lookup orgx-command-map "j")))
+  (should (eq #'orgx-agenda-for-file (keymap-lookup orgx-command-map "/")))
+  (should (eq #'orgx-capture-shell-toggle (keymap-lookup orgx-command-map "C-s")))
+  (should (eq #'orgx-capture-shell-transient (keymap-lookup orgx-command-map "C-t"))))
 
 (ert-deftest orgx-global-minor-mode-test ()
   "Test that activating orgx-global-minor-mode runs setup and sets hooks."
