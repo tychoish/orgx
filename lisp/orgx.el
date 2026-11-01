@@ -33,7 +33,11 @@
 (require 'org-archive)
 (require 'ol)
 
+(declare-function org-cycle-force-archived "org-cycle")
 (declare-function whitespace-cleanup "whitespace")
+(declare-function org-babel-execute:go "ob-go")
+(declare-function org-babel-execute:emacs-lisp "ob-emacs-lisp")
+(declare-function org-babel-execute:js "ob-js")
 (declare-function org-annotate-file "org-annotate-file")
 (declare-function consult-org-heading "consult")
 (declare-function agent-shell-queue-org-refile-from-heading "agent-shell-queue-org")
