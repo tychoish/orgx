@@ -699,7 +699,7 @@ Activates `orgx-commands-map' under C-c o."
   "Alist of (SYMBOL . VALUE) settings managed globally by `orgx-global-mode'.")
 
 (defvar orgx-global--saved-settings nil
-  "Alist of (SYMBOL . (BOUNDP . VALUE)) saved before `orgx-global-mode' was enabled.")
+  "Alist of (SYMBOL . (BOUNDP . VALUE)) saved before enabling.")
 
 (defun orgx-global--apply-settings ()
   "Save previous values and apply `orgx-global--managed-settings'."
