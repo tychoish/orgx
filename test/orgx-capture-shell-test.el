@@ -24,7 +24,7 @@
       (should (string-equal (cdr res) "Inbox")))
 
     ;; Fallback target
-    (let ((res (orgx-capture-shell--resolve-target "/home/other")))
+    (let ((res (orgx-capture-shell--resolve-target "/other/unmatched/path")))
       (should (string-suffix-p "default.org" (car res)))
       (should (string-equal (cdr res) "Inbox")))))
 

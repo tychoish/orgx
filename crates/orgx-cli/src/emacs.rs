@@ -175,11 +175,23 @@ fn resolve_target_string(explicit: Option<&str>) -> Result<String, String> {
 
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
     let server_dir = PathBuf::from(home).join(".emacs.d/server");
-    for candidate in &["tychoish", "server", "work", "hud"] {
-        let p = server_dir.join(candidate);
+    if let Ok(server_name) = std::env::var("EMACS_SERVER_NAME") {
+        let p = server_dir.join(&server_name);
         if p.is_file() {
             if let Ok(t) = read_server_file(p.to_str().unwrap()) {
                 return Ok(t);
+            }
+        }
+    }
+    if server_dir.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&server_dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_file() {
+                    if let Ok(t) = read_server_file(p.to_str().unwrap()) {
+                        return Ok(t);
+                    }
+                }
             }
         }
     }

@@ -21,7 +21,7 @@ Outputs:
 #+begin_src text
 Target: 127.0.0.1:43171:Uv<Q'Su7...
 Status: OK ("Emacs 31.1 connected")
-Default capture target: /home/tychoish/garen/org/agentic.org [Tasks]
+Default capture target: ~/org/agentic.org [Tasks]
 #+end_src
 
 ** Single-Shot Capture

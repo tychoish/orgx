@@ -26,8 +26,8 @@ Invoking ~orgx-capture-shell-toggle~ hides the window if it is currently active,
 When logging an entry, the target file and headline are resolved via ~orgx-capture-shell-target-directory-alist~:
 #+begin_src elisp
 (setq orgx-capture-shell-target-directory-alist
-      '(("/home/tychoish/src/project-a" . ("notes.org" . "Tasks"))
-        ("/home/tychoish/src/project-b" . "inbox.org")
+      '(("~/src/project-a" . ("notes.org" . "Tasks"))
+        ("~/src/project-b" . "inbox.org")
         ("^/tmp/.*" . ("scratch.org" . "Scratch"))))
 #+end_src
 If no directory pattern matches, it falls back to ~orgx-capture-shell-default-file~ (=agentic.org=) and ~orgx-capture-shell-default-headline~ (=Tasks=).
