@@ -102,3 +102,18 @@
           (should hook-called)
           (orgx-mode -1))
       (setq orgx-setup-hook nil))))
+
+
+(ert-deftest orgx-global-mode-revert-settings-test ()
+  "Test that disabling orgx-global-mode reverts managed settings."
+  (let ((org-agenda-sticky nil)
+        (org-agenda-default-appointment-duration 30)
+        (org-refile-targets nil))
+    (orgx-global-mode 1)
+    (should (eq org-agenda-sticky t))
+    (should (= org-agenda-default-appointment-duration 60))
+    (should (equal org-refile-targets '((org-agenda-files :maxlevel . 4))))
+    (orgx-global-mode -1)
+    (should (eq org-agenda-sticky nil))
+    (should (= org-agenda-default-appointment-duration 30))
+    (should (null org-refile-targets))))
