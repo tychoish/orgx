@@ -25,9 +25,6 @@
   (should (fboundp 'orgx-capture))
   (should (fboundp 'orgx-capture-shell)))
 
-(provide 'orgx-test)
-;;; orgx-test.el ends here
-
 (ert-deftest orgx-mode-setup-test ()
   "Test that activating orgx-mode applies local settings."
   (with-temp-buffer
@@ -54,6 +51,22 @@
     (should-not orgx-mode)
     (should-not (memq #'orgx-set-weekday-of-timestamp org-ctrl-c-ctrl-c-hook))))
 
+(ert-deftest orgx-mode-managed-settings-revert-test ()
+  "Test that orgx-mode cleanly reverts buffer-local settings."
+  (with-temp-buffer
+    (org-mode)
+    (setq-local fill-column 80)
+    (setq-local org-tags-column -60)
+    (orgx-mode 1)
+    (should (= fill-column 72))
+    (should (= org-tags-column -70))
+    (orgx-mode -1)
+    ;; Restored prior local values
+    (should (= fill-column 80))
+    (should (= org-tags-column -60))
+    ;; Variables not local prior to orgx-mode should have local binding removed
+    (should-not (local-variable-p 'org-return-follows-link))))
+
 (ert-deftest orgx-gist-keymap-test ()
   "Test that orgx-gist-map is mounted under C-c o g."
   (should (keymapp orgx-gist-map))
@@ -67,7 +80,6 @@
   (should (eq orgx-minor-mode-commands-map orgx-commands-map))
   (should (eq orgx-minor-mode-archive-map orgx-archive-map))
   (should (eq orgx-minor-mode-capture-map orgx-capture-map)))
-
 
 (ert-deftest orgx-global-minor-mode-test ()
   "Test that activating orgx-global-minor-mode runs setup and sets hooks."
@@ -103,7 +115,6 @@
           (orgx-mode -1))
       (setq orgx-setup-hook nil))))
 
-
 (ert-deftest orgx-global-mode-revert-settings-test ()
   "Test that disabling orgx-global-mode reverts managed settings."
   (let ((org-agenda-sticky nil)
@@ -117,3 +128,19 @@
     (should (eq org-agenda-sticky nil))
     (should (= org-agenda-default-appointment-duration 30))
     (should (null org-refile-targets))))
+
+(ert-deftest orgx-babel-setup-test ()
+  "Test that orgx-babel-setup loads all requested languages and defines aliases."
+  (orgx-babel-setup)
+  (should (fboundp 'org-babel-execute:golang))
+  (should (fboundp 'org-babel-execute:elisp))
+  (should (fboundp 'org-babel-execute:javascript))
+  (should (assq 'python org-babel-load-languages))
+  (should (assq 'emacs-lisp org-babel-load-languages))
+  (should (assq 'dot org-babel-load-languages))
+  (should (assq 'js org-babel-load-languages))
+  (should (assq 'go org-babel-load-languages))
+  (should (assq 'rust org-babel-load-languages)))
+
+(provide 'orgx-test)
+;;; orgx-test.el ends here
