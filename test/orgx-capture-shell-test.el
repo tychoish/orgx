@@ -52,10 +52,9 @@
         (let ((orgx-capture-shell-current-file tmp-file)
               (orgx-capture-shell-current-headline "Tasks")
               (orgx-capture-shell-current-template 'task))
-          ;; Insert item
-          (let ((rec (orgx-capture-shell--insert-entry
-                      tmp-file "Tasks" "* TODO Test item 1")))
-            (push rec orgx-capture-shell-undo-ring))
+          ;; Insert item (automatically recorded in undo-ring)
+          (orgx-capture-shell--insert-entry
+           tmp-file "Tasks" "* TODO Test item 1")
           ;; Verify inserted
           (with-temp-buffer
             (insert-file-contents tmp-file)

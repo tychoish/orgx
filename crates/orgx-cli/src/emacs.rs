@@ -196,12 +196,31 @@ fn resolve_target_string(explicit: Option<&str>) -> Result<String, String> {
         }
     }
 
-    // Try default unix socket paths
-    extern "C" { fn geteuid() -> u32; }
-    let uid = unsafe { geteuid() };
-    let default_socket = format!("/run/user/{}/emacs/server", uid);
-    if Path::new(&default_socket).exists() {
-        return Ok(default_socket);
+    // Try default unix socket paths with XDG, macOS TMPDIR, and /run/user fallbacks
+    let server_name = std::env::var("EMACS_SERVER_NAME").unwrap_or_else(|_| "server".to_string());
+
+    if let Ok(xdg_runtime) = std::env::var("XDG_RUNTIME_DIR") {
+        let sock = PathBuf::from(xdg_runtime).join("emacs").join(&server_name);
+        if sock.exists() {
+            return Ok(sock.to_string_lossy().into_owned());
+        }
+    }
+
+    #[cfg(unix)]
+    {
+        extern "C" { fn geteuid() -> u32; }
+        let uid = unsafe { geteuid() };
+
+        let run_sock = format!("/run/user/{}/emacs/{}", uid, server_name);
+        if Path::new(&run_sock).exists() {
+            return Ok(run_sock);
+        }
+
+        let tmp_base = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".to_string());
+        let tmp_sock = PathBuf::from(tmp_base).join(format!("emacs{}", uid)).join(&server_name);
+        if tmp_sock.exists() {
+            return Ok(tmp_sock.to_string_lossy().into_owned());
+        }
     }
 
     Err("Could not locate active Emacs server. Is Emacs running with server-start?".to_string())

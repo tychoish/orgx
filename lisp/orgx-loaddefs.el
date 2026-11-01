@@ -80,7 +80,7 @@ disabled.
 (fn &optional ARG)" t)
 (autoload 'orgx-agenda-minor-mode-turn-on "orgx"
 "Enable `orgx-agenda-minor-mode' in the current buffer.")
-(register-definition-prefixes "orgx" '("ad:org-agenda-" "orgx-"))
+(register-definition-prefixes "orgx" '("orgx-"))
 
 
 ;;; Generated autoloads from orgx-capture.el
@@ -90,7 +90,7 @@ disabled.
 GOTO and KEYS are passed directly to `org-capture'.
 
 (fn &optional GOTO KEYS)" t)
-(autoload 'orgx-reset-capture-templates "orgx-capture"
+(autoload 'orgx-capture-reset-templates "orgx-capture"
 "Reset `org-capture-templates' to the standard base categories." t)
 (autoload 'orgx-capture-add-journal-templates "orgx-capture"
 "Register a full set of journal capture templates for NAME at PATH.
@@ -104,15 +104,15 @@ GOTO and KEYS are passed directly to `org-capture'.
 "Register a full set of note capture templates for NAME at PATH.
 
 (fn &key NAME PATH (KEY \"\"))")
-(autoload 'orgx-add-project-file-capture-templates "orgx-capture"
+(autoload 'orgx-capture-add-project-file-templates "orgx-capture"
 "Register project file capture templates for PATH.
 If `org' is loaded, configures templates immediately; otherwise hooks
 into `org-load-hook'.
 
 (fn &rest ARGS)" nil t)
-(autoload 'orgx--setup-standard-capture-templates "orgx-capture"
+(autoload 'orgx-capture-setup-standard-templates "orgx-capture"
 "Install standard orgx capture templates using customizable default files." t)
-(register-definition-prefixes "orgx-capture" '("org" "~title~"))
+(register-definition-prefixes "orgx-capture" '("orgx-capture-"))
 
 
 ;;; Generated autoloads from orgx-capture-shell.el
@@ -129,21 +129,22 @@ window.  If it is hidden or not active, display it in the bottom popup window." 
 
 ;;; Generated autoloads from orgx-denote.el
 
-(autoload 'orgx-agenda-denote-todos "orgx-denote"
+(autoload 'orgx-denote-agenda-todos "orgx-denote"
 "Show all TODO items across the denote note tree." t)
-(autoload 'orgx-agenda-denote-questions "orgx-denote"
+(autoload 'orgx-denote-agenda-questions "orgx-denote"
 "Show all human questions across the denote tree." t)
-(autoload 'orgx-agenda-denote-composite "orgx-denote"
+(autoload 'orgx-denote-agenda-composite "orgx-denote"
 "Show composite denote agenda, suppressing closed/completed notes." t)
-(autoload 'orgx-agenda-denote-completed-plans "orgx-denote"
+(autoload 'orgx-denote-agenda-completed-plans "orgx-denote"
 "Show all items from completed plans across the denote tree." t)
-(autoload 'orgx-migrate-subtree-to-denote "orgx-denote"
+(autoload 'orgx-denote-migrate-subtree "orgx-denote"
 "Extract the current Org subtree to a new denote note.
 Replaces the original heading with a denote link to the newly created note.
 Preserves timestamps in CREATED property if present." t)
 (autoload 'orgx-denote-setup-capture-templates "orgx-denote"
 "Register Denote templates into `org-capture-templates'." t)
-(register-definition-prefixes "orgx-denote" '("denote-org-refile-to-denote" "org"))
+(register-definition-prefixes "orgx-denote" '("orgx-denote-"))
+
 
 ;;; End of scraped data
 

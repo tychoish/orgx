@@ -82,8 +82,13 @@ that file and headline are used as the default target."
 (defvar-local orgx-capture-shell-current-template 'task
   "Current active template type: \\='task, \\='note, \\='journal, or \\='plain.")
 
-(defvar-local orgx-capture-shell-undo-ring nil
-  "List of recently captured items: ((FILE POSITION TEXT)...).")
+(defcustom orgx-capture-shell-undo-ring-max 50
+  "Maximum number of captured items to retain in `orgx-capture-shell-undo-ring'."
+  :type 'integer
+  :group 'orgx-capture-shell)
+
+(defvar orgx-capture-shell-undo-ring nil
+  "Global list of recently captured items: ((FILE POSITION TEXT)...).")
 
 ;;; Target resolution cascade
 
@@ -146,42 +151,53 @@ that file and headline are used as the default target."
 (defun orgx-capture-shell--insert-entry (file headline entry-text)
   "Insert ENTRY-TEXT under HEADLINE in FILE.
 Returns a record (FILE MARKER-POS ENTRY-TEXT) for the undo ring."
-  (let ((buf (or (get-file-buffer file)
-                 (find-file-noselect file t))))
-    (with-current-buffer buf
-      (save-excursion
-        (org-with-wide-buffer
-         (goto-char (point-min))
-         (let ((found nil))
-           (if (and headline (not (string-empty-p headline)))
-               (progn
-                 (while (and (not found) (re-search-forward org-heading-regexp nil t))
-                   (when (string-equal (org-get-heading t t t t) headline)
-                     (setq found (point))))
-                 (if found
-                     (progn
-                       (goto-char found)
-                       (org-end-of-subtree t t)
-                       (unless (bolp) (insert "\n"))
-                       (let ((pos (point)))
-                         (insert entry-text "\n")
-                         (save-buffer)
-                         (list file pos entry-text)))
-                   ;; Headline not found: create it at top level or end of file
-                   (goto-char (point-max))
-                   (unless (bolp) (insert "\n"))
-                   (insert "* " headline "\n")
-                   (let ((pos (point)))
-                     (insert entry-text "\n")
-                     (save-buffer)
-                     (list file pos entry-text))))
-             ;; No headline: append at end of file
-             (goto-char (point-max))
-             (unless (bolp) (insert "\n"))
-             (let ((pos (point)))
-               (insert entry-text "\n")
-               (save-buffer)
-               (list file pos entry-text)))))))))
+  (let* ((expanded (expand-file-name file))
+         (dir (file-name-directory expanded)))
+    (when (and dir (not (file-directory-p dir)))
+      (make-directory dir t))
+    (let ((buf (or (get-file-buffer expanded)
+                   (find-file-noselect expanded t))))
+      (with-current-buffer buf
+        (unless (derived-mode-p 'org-mode)
+          (org-mode))
+        (let ((rec (save-excursion
+                     (org-with-wide-buffer
+                      (goto-char (point-min))
+                      (let ((found nil))
+                        (if (and headline (not (string-empty-p headline)))
+                            (progn
+                              (while (and (not found) (re-search-forward org-heading-regexp nil t))
+                                (when (string-equal (org-get-heading t t t t) headline)
+                                  (setq found (point))))
+                              (if found
+                                  (progn
+                                    (goto-char found)
+                                    (org-end-of-subtree t t)
+                                    (unless (bolp) (insert "\n"))
+                                    (let ((pos (point)))
+                                      (insert entry-text "\n")
+                                      (save-buffer)
+                                      (list expanded pos entry-text)))
+                                ;; Headline not found: create it at top level or end of file
+                                (goto-char (point-max))
+                                (unless (bolp) (insert "\n"))
+                                (insert "* " headline "\n")
+                                (let ((pos (point)))
+                                  (insert entry-text "\n")
+                                  (save-buffer)
+                                  (list expanded pos entry-text))))
+                          ;; No headline: append at end of file
+                          (goto-char (point-max))
+                          (unless (bolp) (insert "\n"))
+                          (let ((pos (point)))
+                            (insert entry-text "\n")
+                            (save-buffer)
+                            (list expanded pos entry-text))))))))
+          (push rec orgx-capture-shell-undo-ring)
+          (when (> (length orgx-capture-shell-undo-ring) orgx-capture-shell-undo-ring-max)
+            (setq orgx-capture-shell-undo-ring
+                  (seq-take orgx-capture-shell-undo-ring orgx-capture-shell-undo-ring-max)))
+          rec)))))
 
 (defun orgx-capture-shell--undo-last ()
   "Undo the most recently captured entry from `orgx-capture-shell-undo-ring'."
@@ -307,7 +323,6 @@ Returns a record (FILE MARKER-POS ENTRY-TEXT) for the undo ring."
                      orgx-capture-shell-current-file
                      orgx-capture-shell-current-headline
                      formatted)))
-          (push rec orgx-capture-shell-undo-ring)
           (comint-output-filter
            proc
            (format "Captured -> [%s%s] %s\n"
@@ -361,6 +376,14 @@ Returns a record (FILE MARKER-POS ENTRY-TEXT) for the undo ring."
 
 ;;; Interactive Entrypoints
 
+(defun orgx-capture-shell--ensure-process (&optional buf)
+  "Ensure a running dummy comint process exists in BUF."
+  (let ((b (or buf (current-buffer))))
+    (unless (comint-check-proc b)
+      (let ((proc (start-process "orgx-capture-shell" b "cat")))
+        (set-process-query-on-exit-flag proc nil)
+        proc))))
+
 ;;;###autoload
 (defun orgx-capture-shell ()
   "Start or switch to the `orgx-capture-shell' REPL."
@@ -368,11 +391,10 @@ Returns a record (FILE MARKER-POS ENTRY-TEXT) for the undo ring."
   (let ((buf (get-buffer-create orgx-capture-shell-buffer-name)))
     (with-current-buffer buf
       (unless (derived-mode-p 'orgx-capture-shell-mode)
-        ;; Start a dummy comint process for interactive typing and prompt
-        (unless (get-buffer-process buf)
-          (start-process "orgx-capture-shell" buf "cat"))
-        (orgx-capture-shell-mode)
-        (goto-char (point-max))
+        (orgx-capture-shell-mode))
+      (orgx-capture-shell--ensure-process buf)
+      (goto-char (point-max))
+      (when (= (point-min) (point-max))
         (comint-output-filter
          (get-buffer-process buf)
          (concat "Orgx Capture Shell (type /help for commands)\n"

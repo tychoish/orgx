@@ -11,7 +11,7 @@ name = "orgx"
 path = "src/main.rs"
 
 [dependencies]
-sprite-direct = { version = "0.1.0", path = "../../../sprite/rust" }
+sprite-direct = { version = "0.1.0", git = "https://github.com/tychoish/sprite.git" }
 clap = { version = "4", features = ["derive"] }
 reedline = "0.38"
 crossterm = "0.28"

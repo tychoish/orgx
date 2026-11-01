@@ -11,7 +11,7 @@
 ;; - File discovery and filtering for active, completed, and plan notes
 ;; - Sequence-number (signature) sorting and category formatting in org-agenda
 ;; - Dedicated Denote agenda views (todos, questions, composite, completed plans)
-;; - Subtree extraction to new Denote notes (`orgx-migrate-subtree-to-denote')
+;; - Subtree extraction to new Denote notes (`orgx-denote-migrate-subtree')
 ;; - Standard Denote capture templates
 
 ;;; Code:
@@ -125,7 +125,7 @@ excludes completed notes."
                      (orgx-denote-file-completed-p f)))
               (orgx-denote-files)))
 
-(defun orgx-skip-if-completed-note ()
+(defun orgx-denote-skip-if-completed-note ()
   "Skip the current heading if visiting a closed/completed denote note."
   (when (and orgx-denote-agenda-suppress-completed
              (orgx-denote-file-completed-p (buffer-file-name)))
@@ -141,7 +141,7 @@ excludes completed notes."
     (string-pad (string-limit seq orgx-denote-agenda-category-width nil "…")
                 orgx-denote-agenda-category-width)))
 
-(defun orgx-agenda-cmp-denote-signature (a b)
+(defun orgx-denote-agenda-cmp-signature (a b)
   "Order agenda lines A and B by the denote signature of their source file."
   (let* ((file-a (get-text-property 0 'org-category a))
          (file-b (get-text-property 0 'org-category b))
@@ -161,31 +161,31 @@ signature, and formats the sequence category."
     (org-agenda-skip-function-global nil)
     (org-agenda-overriding-header ,header)
     (org-agenda-sorting-strategy '(user-defined-up))
-    (org-agenda-cmp-user-defined #'orgx-agenda-cmp-denote-signature)
+    (org-agenda-cmp-user-defined #'orgx-denote-agenda-cmp-signature)
     (org-agenda-prefix-format '((todo . " %i %-8(orgx-denote-agenda-category) ")
                                 (tags . " %i %-8(orgx-denote-agenda-category) ")))))
 
 ;;;###autoload
-(defun orgx-agenda-denote-todos ()
+(defun orgx-denote-agenda-todos ()
   "Show all TODO items across the denote note tree."
   (interactive)
   (org-tags-view t "+TODO=\"TODO\"|+TODO=\"INPROGRESS\"-question"))
 
 ;;;###autoload
-(defun orgx-agenda-denote-questions ()
+(defun orgx-denote-agenda-questions ()
   "Show all human questions across the denote tree."
   (interactive)
   (org-tags-view t "+question|+TODO=\"QUESTION\""))
 
 ;;;###autoload
-(defun orgx-agenda-denote-composite ()
+(defun orgx-denote-agenda-composite ()
   "Show composite denote agenda, suppressing closed/completed notes."
   (interactive)
   (let ((orgx-denote-agenda-suppress-completed t))
     (org-tags-view t "+TODO=\"TODO\"|+TODO=\"INPROGRESS\"-question")))
 
 ;;;###autoload
-(defun orgx-agenda-denote-completed-plans ()
+(defun orgx-denote-agenda-completed-plans ()
   "Show all items from completed plans across the denote tree."
   (interactive)
   (let ((org-agenda-files (orgx-denote-completed-plan-files)))
@@ -193,19 +193,15 @@ signature, and formats the sequence category."
 
 ;;; Subtree migration
 
-(defun orgx--parse-heading-date (heading)
+(defun orgx-denote--parse-heading-date (heading)
   "Return an Emacs time value for the first org timestamp in HEADING, or nil."
   (when (string-match org-ts-regexp-both heading)
     (condition-case nil
         (org-time-string-to-time (match-string 0 heading))
       (error nil))))
 
-(defalias 'denote-org-refile-to-denote #'orgx-migrate-subtree-to-denote)
-(defalias 'orgx-refile-to-denote #'orgx-migrate-subtree-to-denote)
-(defalias 'org-refile-to-denote #'orgx-migrate-subtree-to-denote)
-
 ;;;###autoload
-(defun orgx-migrate-subtree-to-denote ()
+(defun orgx-denote-migrate-subtree ()
   "Extract the current Org subtree to a new denote note.
 Replaces the original heading with a denote link to the newly created note.
 Preserves timestamps in CREATED property if present."
@@ -218,7 +214,7 @@ Preserves timestamps in CREATED property if present."
          (insert-marker (copy-marker (org-entry-beginning-position)))
          (level (org-current-level))
          (heading (org-get-heading t t t t))
-         (heading-date (orgx--parse-heading-date heading)))
+         (heading-date (orgx-denote--parse-heading-date heading)))
     (when (and heading-date
                (not (or (org-entry-get nil "DATE")
                         (org-entry-get nil "CREATED")

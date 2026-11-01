@@ -58,12 +58,19 @@ pub fn run_repl(
     let mut current_headline = init_headline.unwrap_or(def_hl);
     let mut current_template = init_template.unwrap_or_else(|| "task".to_string());
 
-    // Setup history
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    let cache_dir = PathBuf::from(home).join(".cache/orgx");
+    // Setup history with XDG_CACHE_HOME support and in-memory fallback
+    let cache_dir = if let Ok(xdg_cache) = std::env::var("XDG_CACHE_HOME") {
+        PathBuf::from(xdg_cache).join("orgx")
+    } else {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        PathBuf::from(home).join(".cache").join("orgx")
+    };
     let _ = std::fs::create_dir_all(&cache_dir);
     let history_file = cache_dir.join("history");
-    let history = Box::new(FileBackedHistory::with_file(1000, history_file)?);
+    let history: Box<dyn reedline::History> = match FileBackedHistory::with_file(1000, history_file) {
+        Ok(f) => Box::new(f),
+        Err(_) => Box::new(reedline::FileBackedHistory::default()),
+    };
 
     // Setup completions
     let commands = vec![

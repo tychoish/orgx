@@ -40,11 +40,17 @@
 (declare-function agent-shell-queue-org-refile-from-heading "agent-shell-queue-org")
 
 (declare-function orgx-capture "orgx-capture")
-(declare-function orgx-reset-capture-templates "orgx-capture")
+(declare-function orgx-capture-reset-templates "orgx-capture")
+(declare-function orgx-capture-add-project-file-templates "orgx-capture")
+(declare-function orgx-capture-setup-standard-templates "orgx-capture")
 (declare-function orgx-capture-shell "orgx-capture-shell")
 (declare-function orgx-capture-shell-toggle "orgx-capture-shell")
 (declare-function orgx-capture-shell-transient "orgx-capture-shell")
-(declare-function orgx-migrate-subtree-to-denote "orgx-denote")
+(declare-function orgx-denote-migrate-subtree "orgx-denote")
+(declare-function orgx-denote-agenda-todos "orgx-denote")
+(declare-function orgx-denote-agenda-questions "orgx-denote")
+(declare-function orgx-denote-agenda-composite "orgx-denote")
+(declare-function orgx-denote-agenda-completed-plans "orgx-denote")
 
 (defvar org-link-parameters)
 (defvar org-stored-links)
@@ -142,16 +148,12 @@ When SHORT is non-nil, format as date-only."
                   (revert-buffer :ignore-auto :noconfirm))))
             (org-agenda-files))))
 
-(defun ad:org-agenda--open-files (&rest _)
-  "Advice to background-revert buffers when opening agenda files."
-  (orgx--background-revbufs))
-
-(defun ad:org-agenda-redo (orig-fun &rest args)
+(defun orgx--ad-org-agenda-redo (orig-fun &rest args)
   "Advice to background-revert buffers before re-running agenda view."
   (orgx--background-revbufs)
   (apply orig-fun args))
 
-(advice-add 'org-agenda-redo :around #'ad:org-agenda-redo)
+(advice-add 'org-agenda-redo :around #'orgx--ad-org-agenda-redo)
 
 ;;; Task status and archiving
 
@@ -532,7 +534,7 @@ Activates `orgx-minor-mode-commands-map' under C-c o."
 (keymap-set orgx-agenda-minor-mode-map "C-l" #'org-agenda-open-link)
 (keymap-set orgx-agenda-minor-mode-map "M-c" #'org-agenda-goto-calendar)
 (keymap-set orgx-agenda-minor-mode-map "/" #'orgx-agenda-for-file)
-(keymap-set orgx-agenda-minor-mode-map "C-e" #'orgx-migrate-subtree-to-denote)
+(keymap-set orgx-agenda-minor-mode-map "C-e" #'orgx-denote-migrate-subtree)
 (keymap-set orgx-agenda-minor-mode-map "C-b" #'orgx-agenda-switch-buffer)
 (keymap-set orgx-agenda-minor-mode-map "M-a" #'orgx-agenda-view)
 (keymap-set orgx-agenda-minor-mode-map "r" #'org-agenda-refile)
@@ -549,6 +551,19 @@ Activates `orgx-minor-mode-commands-map' under C-c o."
 (defun orgx-agenda-minor-mode-turn-on ()
   "Enable `orgx-agenda-minor-mode' in the current buffer."
   (orgx-agenda-minor-mode 1))
+
+
+;;; Convenience aliases across orgx modules
+
+(defalias 'orgx-reset-capture-templates #'orgx-capture-reset-templates)
+(defalias 'orgx-add-project-file-capture-templates #'orgx-capture-add-project-file-templates)
+(defalias 'orgx-setup-standard-capture-templates #'orgx-capture-setup-standard-templates)
+(defalias 'orgx-migrate-subtree-to-denote #'orgx-denote-migrate-subtree)
+(defalias 'orgx-refile-to-denote #'orgx-denote-migrate-subtree)
+(defalias 'orgx-agenda-denote-todos #'orgx-denote-agenda-todos)
+(defalias 'orgx-agenda-denote-questions #'orgx-denote-agenda-questions)
+(defalias 'orgx-agenda-denote-composite #'orgx-denote-agenda-composite)
+(defalias 'orgx-agenda-denote-completed-plans #'orgx-denote-agenda-completed-plans)
 
 (provide 'orgx)
 ;;; orgx.el ends here

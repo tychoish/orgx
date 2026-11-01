@@ -1,4 +1,4 @@
-;;; orgx-capture.el --- org-capture template DSL and registration -*- lexical-binding: t; -*-
+;;; orgx-capture.el --- Org-capture template DSL and registration -*- lexical-binding: t; -*-
 
 ;; Author: tychoish <tychoish@tychoish.com>
 ;; URL: https://github.com/tychoish/orgx
@@ -32,9 +32,9 @@
 (declare-function annotated-completing-read "annotated-completing-read")
 (declare-function org-agenda-files "org")
 
-(defvar org-capture-templates nil)
-(defvar org-capture-plist nil)
-(defvar org-stored-links nil)
+(defvar org-capture-templates)
+(defvar org-capture-plist)
+(defvar org-stored-links)
 (defvar org-directory)
 
 (defgroup orgx-capture nil
@@ -89,7 +89,7 @@ GOTO and KEYS are passed directly to `org-capture'."
   (org-capture goto keys))
 
 ;;;###autoload
-(defun orgx-reset-capture-templates ()
+(defun orgx-capture-reset-templates ()
   "Reset `org-capture-templates' to the standard base categories."
   (interactive)
   (setq org-capture-templates '(("t" "tasks")
@@ -97,11 +97,11 @@ GOTO and KEYS are passed directly to `org-capture'."
                                 ("n" "notes")
                                 ("a" "agent"))))
 
-(defun ~title~ ()
+(defun orgx-capture--read-title ()
   "Read a title string interactively during `org-capture' template expansion."
   (read-string "title => "))
 
-(defun orgx--capture-prompt-link ()
+(defun orgx-capture--prompt-link ()
   "Interactively select or create an Org link.
 If `org-stored-links' is non-nil, offers candidates via ACR/completing-read.
 Otherwise prompts for a link target and optional description."
@@ -137,7 +137,7 @@ Otherwise prompts for a link target and optional description."
               (format "[[%s][%s]]" choice desc)
             (format "[[%s]]" choice)))))))
 
-(defun orgx--capture-get-link ()
+(defun orgx-capture--get-link ()
   "Return an Org link string `[[link][description]]` for capture expansion.
 First checks if an annotation link was captured or stored in `org-stored-links'.
 If unavailable, interactively prompts the user to select or create a link."
@@ -152,11 +152,11 @@ If unavailable, interactively prompts the user to select or create a link."
             (format "[[%s][%s]]" (car latest) (cadr latest))
           (format "[[%s]]" (car latest)))))
      (t
-      (orgx--capture-prompt-link)))))
+      (orgx-capture--prompt-link)))))
 
 ;;; Flat template generator engine
 
-(cl-defun orgx--capture-add-flat-templates
+(cl-defun orgx-capture--add-flat-templates
     (&key kind char name path (key "") target body-fn first-sub default-subs
           (prepend t) (time-prompt-suffix nil))
   "Register a flat set of capture templates of KIND for NAME at PATH.
@@ -222,7 +222,7 @@ ends with TIME-PROMPT-SUFFIX, the template is marked :time-prompt t."
 ;;;###autoload
 (cl-defun orgx-capture-add-journal-templates (&key name path (key ""))
   "Register a full set of journal capture templates for NAME at PATH."
-  (orgx--capture-add-flat-templates
+  (orgx-capture--add-flat-templates
    :kind "journal" :char "j" :name name :path path :key key
    :target (if (string-equal "" key)
                (list 'file+olp+datetree path)
@@ -232,16 +232,16 @@ ends with TIME-PROMPT-SUFFIX, the template is marked :time-prompt t."
                (heading-p
                 (concat "* " anchor " <%<%Y-%m-%d %H:%M>>%?"))
                ((string-empty-p anchor)
-                "* %(~title~) <%<%Y-%m-%d %H:%M>>%?")
+                "* %(orgx-capture--read-title) <%<%Y-%m-%d %H:%M>>%?")
                (t
-                (concat "* %(~title~) <%<%Y-%m-%d %H:%M>>\n" anchor "%?"))))
+                (concat "* %(orgx-capture--read-title) <%<%Y-%m-%d %H:%M>>\n" anchor "%?"))))
    :first-sub (cons "" "<today>")
    :default-subs '(("jj" "" "<today>")
                    ("jp" "" "<date prompt>")
                    ("jx" "%x" "X11 buffer")
-                   ("jlb" "%(orgx--capture-get-link)" "org-link (body)")
-                   ("jlh" "%(orgx--capture-get-link)" "org-link (heading)" :heading-anchor t)
-                   ("jlq" "%(orgx--capture-prompt-link)" "quick org-link (heading)" :heading-anchor t :immediate-finish t)
+                   ("jlb" "%(orgx-capture--get-link)" "org-link (body)")
+                   ("jlh" "%(orgx-capture--get-link)" "org-link (heading)" :heading-anchor t)
+                   ("jlq" "%(orgx-capture--prompt-link)" "quick org-link (heading)" :heading-anchor t :immediate-finish t)
                    ("jk" "%c" "emacs kill-ring"))
    :prepend nil
    :time-prompt-suffix "jp"))
@@ -249,7 +249,7 @@ ends with TIME-PROMPT-SUFFIX, the template is marked :time-prompt t."
 ;;;###autoload
 (cl-defun orgx-capture-add-task-templates (&key name path (key ""))
   "Register a full set of task capture templates for NAME at PATH."
-  (orgx--capture-add-flat-templates
+  (orgx-capture--add-flat-templates
    :kind "tasks" :char "t" :name name :path path :key key
    :target (list 'file+headline path "Tasks")
    :body-fn (lambda (anchor &optional heading-p)
@@ -257,22 +257,22 @@ ends with TIME-PROMPT-SUFFIX, the template is marked :time-prompt t."
                (heading-p
                 (concat "* TODO " anchor "%?"))
                ((string-empty-p anchor)
-                "* TODO %(~title~)%?")
+                "* TODO %(orgx-capture--read-title)%?")
                (t
-                (concat "* TODO %(~title~)\n" anchor "%?"))))
+                (concat "* TODO %(orgx-capture--read-title)\n" anchor "%?"))))
    :first-sub (cons "%i" "selection")
    :default-subs '(("tt" "%i" "selection")
                    ("tq" "" "quick task" :immediate-finish t)
                    ("tx" "%x" "X11 buffer")
-                   ("tlb" "%(orgx--capture-get-link)" "org-link (body)")
-                   ("tlh" "%(orgx--capture-get-link)" "org-link (heading)" :heading-anchor t)
-                   ("tlq" "%(orgx--capture-prompt-link)" "quick org-link task" :heading-anchor t :immediate-finish t)
+                   ("tlb" "%(orgx-capture--get-link)" "org-link (body)")
+                   ("tlh" "%(orgx-capture--get-link)" "org-link (heading)" :heading-anchor t)
+                   ("tlq" "%(orgx-capture--prompt-link)" "quick org-link task" :heading-anchor t :immediate-finish t)
                    ("tk" "%c" "emacs kill-ring"))))
 
 ;;;###autoload
 (cl-defun orgx-capture-add-note-templates (&key name path (key ""))
   "Register a full set of note capture templates for NAME at PATH."
-  (orgx--capture-add-flat-templates
+  (orgx-capture--add-flat-templates
    :kind "notes" :char "n" :name name :path path :key key
    :target (list 'file+headline path "Inbox")
    :body-fn (lambda (anchor &optional heading-p)
@@ -280,33 +280,33 @@ ends with TIME-PROMPT-SUFFIX, the template is marked :time-prompt t."
                (heading-p
                 (concat "* " anchor "%?"))
                ((string-empty-p anchor)
-                "* %(~title~)%?")
+                "* %(orgx-capture--read-title)%?")
                (t
-                (concat "* %(~title~)\n" anchor "%?"))))
+                (concat "* %(orgx-capture--read-title)\n" anchor "%?"))))
    :first-sub (cons "%i" "selection")
    :default-subs '(("nn" "%i" "selection")
                    ("nx" "%x" "X11 buffer")
-                   ("nlb" "%(orgx--capture-get-link)" "org-link (body)")
-                   ("nlh" "%(orgx--capture-get-link)" "org-link (heading)" :heading-anchor t)
-                   ("nlq" "%(orgx--capture-prompt-link)" "quick org-link (heading)" :heading-anchor t :immediate-finish t)
+                   ("nlb" "%(orgx-capture--get-link)" "org-link (body)")
+                   ("nlh" "%(orgx-capture--get-link)" "org-link (heading)" :heading-anchor t)
+                   ("nlq" "%(orgx-capture--prompt-link)" "quick org-link (heading)" :heading-anchor t :immediate-finish t)
                    ("nk" "%c" "emacs kill-ring"))))
 
 ;;; Registration helpers
 
 ;;;###autoload
-(defmacro orgx-add-project-file-capture-templates (&rest args)
+(defmacro orgx-capture-add-project-file-templates (&rest args)
   "Register project file capture templates for PATH.
 If `org' is loaded, configures templates immediately; otherwise hooks
 into `org-load-hook'."
   `(if (featurep 'org)
-       (orgx--add-project-file-capture-templates ,@args)
+       (orgx-capture--add-project-file-templates ,@args)
      (add-hook 'org-load-hook
-               (lambda () (orgx--add-project-file-capture-templates ,@args)))))
+               (lambda () (orgx-capture--add-project-file-templates ,@args)))))
 
-(cl-defun orgx--add-project-file-capture-templates (&key name (path nil) (key "") (agenda nil))
+(cl-defun orgx-capture--add-project-file-templates (&key name (path nil) (key "") (agenda nil))
   "Define a set of capture templates for adding notes and tasks to PATH."
   (unless (and (boundp 'org-capture-templates) org-capture-templates)
-    (orgx-reset-capture-templates))
+    (orgx-capture-reset-templates))
 
   (when (and agenda (boundp 'org-agenda-files) (not (member (expand-file-name path) (org-agenda-files))))
     (add-to-list 'org-agenda-files (expand-file-name path)))
@@ -354,26 +354,22 @@ into `org-load-hook'."
      :path org-filename)))
 
 ;;;###autoload
-(defun orgx--setup-standard-capture-templates ()
+(defun orgx-capture-setup-standard-templates ()
   "Install standard orgx capture templates using customizable default files."
   (interactive)
   (orgx-capture-add-note-templates
    :name "notes"
    :path orgx-capture-default-notes-file)
-
   (orgx-capture-add-journal-templates
    :name "diary"
    :path orgx-capture-default-journal-file)
-
   (orgx-capture-add-task-templates
    :name "prime"
    :path orgx-capture-default-tasks-file)
-
   (orgx-capture-add-task-templates
    :name "agentic"
    :path orgx-capture-default-agent-file
    :key "a")
-
   (orgx-capture-add-journal-templates
    :name "agentic"
    :path orgx-capture-default-agent-file

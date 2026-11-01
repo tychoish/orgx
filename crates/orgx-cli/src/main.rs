@@ -59,9 +59,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let target_file = file.unwrap_or(def_file);
             let target_hl = headline.unwrap_or(def_hl);
             let entry_text = if text.is_empty() {
-                // Read line from stdin
+                // Read all available input from stdin (supports pipes and multiline notes)
+                use std::io::Read;
                 let mut input = String::new();
-                std::io::stdin().read_line(&mut input)?;
+                std::io::stdin().read_to_string(&mut input)?;
                 input.trim().to_string()
             } else {
                 text.join(" ")
