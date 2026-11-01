@@ -363,6 +363,9 @@ into `org-load-hook'."
 (defun orgx-capture-setup-standard-templates ()
   "Install standard orgx capture templates using customizable default files."
   (interactive)
+  (require 'org-capture)
+  (unless (boundp 'org-capture-templates)
+    (setq org-capture-templates nil))
   (orgx-capture-add-note-templates
    :name "notes"
    :path orgx-capture-default-notes-file)
