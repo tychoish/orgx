@@ -142,5 +142,25 @@
   (should (assq 'go org-babel-load-languages))
   (should (assq 'rust org-babel-load-languages)))
 
+(ert-deftest orgx-set-notes-directory-test ()
+  "Test setting the notes directory updates related paths."
+  (let ((local-notes-directory nil)
+        (user-org-directories nil)
+        (org-directory nil)
+        (org-agenda-files nil)
+        (org-annotate-file-storage-file nil)
+        (deft-directory nil)
+        (denote-directory nil))
+    (orgx-set-notes-directory "/tmp/test-notes")
+    (should (equal local-notes-directory (expand-file-name "/tmp/test-notes")))
+    (should (equal org-directory (expand-file-name "/tmp/test-notes/org")))
+    (should (member (expand-file-name "/tmp/test-notes/org") org-agenda-files))
+    (should (equal org-annotate-file-storage-file (expand-file-name "/tmp/test-notes/org/records.org")))
+    (should (equal deft-directory (expand-file-name "/tmp/test-notes/deft")))
+    (should (equal denote-directory (expand-file-name "/tmp/test-notes/denote")))
+    ;; Also verify bootstrap-set-notes-directory alias works
+    (bootstrap-set-notes-directory "/tmp/test-notes-2")
+    (should (equal local-notes-directory (expand-file-name "/tmp/test-notes-2")))))
+
 (provide 'orgx-test)
 ;;; orgx-test.el ends here
