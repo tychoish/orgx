@@ -1,0 +1,64 @@
+#+title: Orgx CLI & Terminal REPL
+#+author: tychoish
+#+language: en
+
+The =orgx= CLI binary (=crates/orgx-cli=) is a high-performance native command-line companion to Emacs Org mode built in Rust. It speaks the Sprite wire protocol directly over local Unix sockets or TCP connections.
+
+* Features
+
+- *Direct Sprite Protocol*: Zero wrapper scripts; connects directly to the Emacs daemon server socket.
+- *Single-Shot Capture*: Scriptable capture for terminal pipelines, git hooks, and shell aliases.
+- *Reedline Terminal REPL*: Interactive terminal prompt with syntax formatting, persistent history (=~/.cache/orgx/history=), and tab completion.
+- *Automatic Server Discovery*: Automatically detects active Emacs daemons across standard socket paths and =~/.emacs.d/server/=.
+
+* Usage
+
+** Checking Connection & Status
+#+begin_src bash
+orgx status
+#+end_src
+Outputs:
+#+begin_src text
+Target: 127.0.0.1:43171:Uv<Q'Su7...
+Status: OK ("Emacs 31.1 connected")
+Default capture target: /home/tychoish/garen/org/agentic.org [Tasks]
+#+end_src
+
+** Single-Shot Capture
+Capture a task directly from the shell:
+#+begin_src bash
+orgx capture "Investigate intermittent latency in Redis connection pool"
+#+end_src
+
+Capture into a specific file and headline with a template:
+#+begin_src bash
+orgx capture -f ~/org/project.org -H Backlog -t note "Architecture review notes"
+#+end_src
+
+Capture from standard input:
+#+begin_src bash
+echo "Verify database backups" | orgx capture
+#+end_src
+
+** Interactive Terminal REPL
+Launch the interactive terminal shell:
+#+begin_src bash
+orgx repl
+# or simply:
+orgx
+#+end_src
+
+Interactive prompt:
+#+begin_src text
+Orgx Capture Shell (Rust REPL)
+Type /help for commands, Ctrl-D or /quit to exit.
+
+orgx [agentic.org:Tasks] (task)> Review deployment logs
+Captured -> [agentic.org:Tasks] * TODO Review deployment logs
+orgx [agentic.org:Tasks] (task)> /template journal
+Template switched to: journal
+orgx [agentic.org:Tasks] (journal)> Standup meeting completed
+Captured -> [agentic.org:Tasks] * Standup meeting completed <2026-11-01 10:45>
+orgx [agentic.org:Tasks] (journal)> /undo
+Undid capture: "Standup meeting completed <2026-11-01 10:45>" from agentic.org
+#+end_src

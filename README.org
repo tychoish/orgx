@@ -9,10 +9,24 @@ Org mode extensions, structured capture templates, continuous REPL capture shell
 =orgx= is a dual-stack monorepo providing structured Org mode extensions and tooling:
 - *Emacs Lisp Suite (=lisp/=)*:
   - =orgx.el=: Core Org conveniences, unified global (=C-c o=) and minor-mode (=C-c o c=) keymaps, and structured navigation.
-  - =orgx-capture.el=: Structured capture template generator DSL with Denote and ASQ hooks.
-  - =orgx-capture-shell.el=: Non-modal comint REPL capture shell displayed in a dedicated bottom popup window.
+  - =orgx-capture.el=: Structured capture template generator DSL with customizable default files.
+  - =orgx-capture-shell.el=: Non-modal comint REPL capture shell displayed in a dedicated 15-line bottom popup window.
 - *Rust CLI (=crates/orgx-cli/)*:
   - High-performance command-line client built on =sprite-direct= and =reedline= for one-shot piping and interactive terminal capture outside Emacs.
+
+* Documentation
+
+- [[file:docs/capture-shell.org][Orgx Capture Shell Guide]]: In-depth guide to the non-modal capture shell, target resolution cascade, popup window rules, and slash commands.
+- [[file:docs/cli.org][Orgx CLI & Terminal REPL]]: Guide to the native Rust CLI binary, single-shot capture, Sprite protocol connection, and Reedline terminal REPL.
+
+* Keybindings
+
+| Key Sequence  | Command                         | Description                                      |
+|---------------+---------------------------------+--------------------------------------------------|
+| =C-c o C-s=   | ~orgx-capture-shell-toggle~     | Toggle 15-line bottom popup capture shell buffer |
+| =C-c o c s=   | ~orgx-capture-shell~            | Open/focus capture shell buffer directly         |
+| =C-c o C-t=   | ~orgx-capture-shell-transient~  | Open transient capture modal menu                |
+| =C-c o c C-t= | ~orgx-capture-shell-transient~  | Open transient capture modal menu from capture   |
 
 * Repository Layout
 
@@ -32,8 +46,15 @@ Org mode extensions, structured capture templates, continuous REPL capture shell
 ├── crates/             # Rust tools
 │   └── orgx-cli/
 ├── test/               # ERT test suites
+│   ├── orgx-test.el
+│   ├── orgx-capture-test.el
+│   └── orgx-capture-shell-test.el
 ├── docs/               # Modular documentation
+│   ├── capture-shell.org
+│   └── cli.org
 └── .github/workflows/  # Continuous integration
+    ├── elisp-ci.yml
+    └── rust-ci.yml
 #+end_src
 
 * Building & Testing

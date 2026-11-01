@@ -1,0 +1,43 @@
+#+title: Orgx Capture Shell Guide
+#+author: tychoish
+#+language: en
+
+The Orgx Capture Shell (=orgx-capture-shell.el=) provides a continuous, non-modal REPL for logging notes, tasks, and journal entries into Org mode buffers without interrupting active window configurations.
+
+* Quickstart
+
+1. Toggle the capture shell popup window:
+   - Key: =C-c o C-s= or =C-c o c s=
+   - Command: ~M-x orgx-capture-shell-toggle~
+2. Open the transient menu:
+   - Key: =C-c o C-t= or =C-c o c C-t=
+   - Command: ~M-x orgx-capture-shell-transient~
+
+* Architecture & Features
+
+** 1. Dedicated Popup Window
+The capture shell resides in a buffer named =*orgx-capture-shell*= and is automatically routed to a 15-line bottom popup window via ~display-buffer-alist~:
+#+begin_src elisp
+(display-buffer-reuse-window display-buffer-at-bottom)
+#+end_src
+Invoking ~orgx-capture-shell-toggle~ hides the window if it is currently active, or displays and focuses it if hidden.
+
+** 2. Cascading Target Resolution
+When logging an entry, the target file and headline are resolved via ~orgx-capture-shell-target-directory-alist~:
+#+begin_src elisp
+(setq orgx-capture-shell-target-directory-alist
+      '(("/home/tychoish/src/project-a" . ("notes.org" . "Tasks"))
+        ("/home/tychoish/src/project-b" . "inbox.org")
+        ("^/tmp/.*" . ("scratch.org" . "Scratch"))))
+#+end_src
+If no directory pattern matches, it falls back to ~orgx-capture-shell-default-file~ (=agentic.org=) and ~orgx-capture-shell-default-headline~ (=Tasks=).
+
+** 3. Slash Commands
+Within the REPL buffer, slash commands allow dynamic reconfiguration:
+- =/target [file[:headline]]= :: Switch target file and headline on the fly.
+- =/template [task|note|journal|plain]= :: Switch active template formatting.
+- =/denote= :: Interactively pick a Denote note as the capture target.
+- =/undo= :: Roll back the most recently captured item.
+- =/recent= or =/list= :: List recently captured items in the session.
+- =/clear= :: Clear the REPL scrollback.
+- =/help= :: Display inline command reference.
