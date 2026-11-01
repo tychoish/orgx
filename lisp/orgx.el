@@ -494,6 +494,7 @@ When optional TAG is supplied, search for that tag instead."
 
 ;;; Keymaps and minor modes
 
+(defvaralias 'orgx-minor-mode-capture-map 'orgx-capture-map)
 (defvar-keymap orgx-capture-map
   :name "orgx-capture"
   :doc "Capture commands under C-c o c (orgx-mode).")
@@ -508,6 +509,7 @@ When optional TAG is supplied, search for that tag instead."
 (keymap-set orgx-capture-map "s" #'orgx-capture-shell)
 (keymap-set orgx-capture-map "C-t" #'orgx-capture-shell-transient)
 
+(defvaralias 'orgx-minor-mode-archive-map 'orgx-archive-map)
 (defvar-keymap orgx-archive-map
   :name "orgx-archive"
   :doc "Archive commands under C-c o C-f (orgx-mode).")
@@ -517,6 +519,7 @@ When optional TAG is supplied, search for that tag instead."
 (keymap-set orgx-archive-map "s" (cons "current→sibling" #'org-archive-to-archive-sibling))
 (keymap-set orgx-archive-map "d" (cons "done+archive" #'orgx-mark-done-and-archive))
 
+(defvaralias 'orgx-minor-mode-commands-map 'orgx-commands-map)
 (defvar-keymap orgx-commands-map
   :name "orgx-commands"
   :doc "Command keymap for `orgx-mode' mounted under C-c o.")
@@ -543,11 +546,6 @@ When optional TAG is supplied, search for that tag instead."
 (keymap-set orgx-commands-map "g" orgx-gist-map)
 
 (defvaralias 'orgx-minor-mode-map 'orgx-mode-map)
-(defvaralias 'orgx-minor-mode-commands-map 'orgx-commands-map)
-(defvaralias 'orgx-minor-mode-archive-map 'orgx-archive-map)
-(defvaralias 'orgx-minor-mode-capture-map 'orgx-capture-map)
-(defalias 'orgx-minor-mode #'orgx-mode)
-
 (defvar-keymap orgx-mode-map
   :doc "Buffer-local minor mode keymap activating commands under C-c o.")
 
@@ -618,6 +616,8 @@ When optional TAG is supplied, search for that tag instead."
   (remove-hook 'before-save-hook #'whitespace-cleanup t))
 
 ;;;###autoload
+(defalias 'orgx-minor-mode #'orgx-mode)
+
 (define-minor-mode orgx-mode
   "Personal org-mode keybindings and buffer setup.
 Activates `orgx-commands-map' under C-c o."
