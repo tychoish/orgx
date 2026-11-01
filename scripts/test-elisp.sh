@@ -6,5 +6,5 @@ emacs -Q --batch \
   -L "${REPO_ROOT}/lisp" \
   -L "${REPO_ROOT}/test" \
   -l ert \
-  --eval "(dolist (f (directory-files \"${REPO_ROOT}/test\" t \"test-.*\\\\.el$\")) (load-file f))" \
+  --eval '(dolist (f (directory-files "'"${REPO_ROOT}"'/test" t ".*-test\\.el$")) (load f nil t))' \
   -f ert-run-tests-batch-and-exit
