@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/orgx-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+authors = ["tychoish"]
+
+[patch.crates-io]
+# Local sibling development override for sprite-direct:
+sprite-direct = { path = "../sprite/rust" }

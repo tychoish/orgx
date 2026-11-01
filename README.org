@@ -1,0 +1,72 @@
+#+title: orgx
+#+author: tychoish
+#+language: en
+
+Org mode extensions, structured capture templates, continuous REPL capture shell, and native command-line tooling for Emacs.
+
+* Overview
+
+=orgx= is a dual-stack monorepo providing structured Org mode extensions and tooling:
+- *Emacs Lisp Suite (=lisp/=)*:
+  - =orgx.el=: Core Org conveniences, unified global (=C-c o=) and minor-mode (=C-c o c=) keymaps, and structured navigation.
+  - =orgx-capture.el=: Structured capture template generator DSL with Denote and ASQ hooks.
+  - =orgx-capture-shell.el=: Non-modal comint REPL capture shell displayed in a dedicated bottom popup window.
+- *Rust CLI (=crates/orgx-cli/)*:
+  - High-performance command-line client built on =sprite-direct= and =reedline= for one-shot piping and interactive terminal capture outside Emacs.
+
+* Repository Layout
+
+#+begin_src text
+~/src/orgx/
+├── Cargo.toml          # Cargo workspace manifest
+├── scripts/            # Command runner scripts (no Makefile)
+│   ├── compile-elisp.sh
+│   ├── test-elisp.sh
+│   ├── build-cli.sh
+│   ├── test-cli.sh
+│   └── test-all.sh
+├── lisp/               # Emacs Lisp packages
+│   ├── orgx.el
+│   ├── orgx-capture.el
+│   └── orgx-capture-shell.el
+├── crates/             # Rust tools
+│   └── orgx-cli/
+├── test/               # ERT test suites
+├── docs/               # Modular documentation
+└── .github/workflows/  # Continuous integration
+#+end_src
+
+* Building & Testing
+
+All actions can be invoked directly with standard tools or via the helper scripts under =scripts/=:
+
+** Emacs Lisp
+- Byte-compile:
+  #+begin_src bash
+  ./scripts/compile-elisp.sh
+  # or directly:
+  emacs -Q --batch -L lisp -f batch-byte-compile lisp/*.el
+  #+end_src
+- ERT Tests:
+  #+begin_src bash
+  ./scripts/test-elisp.sh
+  # or directly:
+  emacs -Q --batch -L lisp -L test -l ert -f ert-run-tests-batch-and-exit
+  #+end_src
+
+** Rust CLI
+- Build binary:
+  #+begin_src bash
+  ./scripts/build-cli.sh
+  # or directly:
+  cargo build --release -p orgx-cli
+  #+end_src
+- Test:
+  #+begin_src bash
+  ./scripts/test-cli.sh
+  # or directly:
+  cargo test --workspace
+  #+end_src
+
+* License
+GPL-3.0-or-later

@@ -1,0 +1,17 @@
+[package]
+name = "orgx-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Standalone CLI and REPL interface for Emacs Org capture and shell"
+
+[[bin]]
+name = "orgx"
+path = "src/main.rs"
+
+[dependencies]
+sprite-direct = { version = "0.1.0", path = "../../../sprite/rust" }
+clap = { version = "4", features = ["derive"] }
+reedline = "0.38"
+crossterm = "0.28"

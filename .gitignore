@@ -1,0 +1,17 @@
+# Emacs
+*.elc
+*-autoloads.el
+*~
+\#*\#
+.#*
+.cask/
+.ert-runner/
+
+# Rust / Cargo
+/target/
+**/*.rs.bk
+
+# OS & Editor
+.DS_Store
+.projectile
+.cache/
