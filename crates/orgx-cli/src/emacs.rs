@@ -1,7 +1,7 @@
+use sprite_direct::{eval_blocking, quote, Sexp, SpriteError};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use sprite_direct::{eval_blocking, quote, Sexp, SpriteError};
 
 #[derive(Debug, Clone)]
 pub struct EmacsClient {
@@ -24,7 +24,8 @@ impl EmacsClient {
             Sexp::Str("Emacs %s connected".to_string()),
             Sexp::Sym("emacs-version".to_string()),
         ]);
-        self.eval(&form).map_err(|e| format!("Emacs eval error: {}", e))
+        self.eval(&form)
+            .map_err(|e| format!("Emacs eval error: {}", e))
     }
 
     pub fn resolve_default_target(&self, dir: &str) -> Result<(String, String), String> {
@@ -36,21 +37,25 @@ impl EmacsClient {
             ]),
             Sexp::List(vec![
                 Sexp::Sym("let".to_string()),
-            Sexp::List(vec![
-                Sexp::List(vec![
+                Sexp::List(vec![Sexp::List(vec![
                     Sexp::Sym("res".to_string()),
                     Sexp::List(vec![
                         Sexp::Sym("orgx-capture-shell--resolve-target".to_string()),
                         Sexp::Str(dir.to_string()),
                     ]),
+                ])]),
+                Sexp::List(vec![
+                    Sexp::Sym("format".to_string()),
+                    Sexp::Str("%s|%s".to_string()),
+                    Sexp::List(vec![
+                        Sexp::Sym("car".to_string()),
+                        Sexp::Sym("res".to_string()),
+                    ]),
+                    Sexp::List(vec![
+                        Sexp::Sym("cdr".to_string()),
+                        Sexp::Sym("res".to_string()),
+                    ]),
                 ]),
-            ]),
-            Sexp::List(vec![
-                Sexp::Sym("format".to_string()),
-                Sexp::Str("%s|%s".to_string()),
-                Sexp::List(vec![Sexp::Sym("car".to_string()), Sexp::Sym("res".to_string())]),
-                Sexp::List(vec![Sexp::Sym("cdr".to_string()), Sexp::Sym("res".to_string())]),
-            ]),
             ]),
         ]);
 
@@ -79,67 +84,69 @@ impl EmacsClient {
             ]),
             Sexp::List(vec![
                 Sexp::Sym("let*".to_string()),
-            Sexp::List(vec![
                 Sexp::List(vec![
-                    Sexp::Sym("f".to_string()),
                     Sexp::List(vec![
-                        Sexp::Sym("expand-file-name".to_string()),
-                        Sexp::Str(file.to_string()),
-                    ]),
-                ]),
-                Sexp::List(vec![
-                    Sexp::Sym("h".to_string()),
-                    if headline.is_empty() {
-                        Sexp::Sym("nil".to_string())
-                    } else {
-                        Sexp::Str(headline.to_string())
-                    },
-                ]),
-                Sexp::List(vec![
-                    Sexp::Sym("tpl".to_string()),
-                    quote(Sexp::Sym(template.to_string())),
-                ]),
-                Sexp::List(vec![
-                    Sexp::Sym("entry".to_string()),
-                    Sexp::List(vec![
-                        Sexp::Sym("orgx-capture-shell--format-entry".to_string()),
-                        Sexp::Str(text.to_string()),
-                        Sexp::Sym("tpl".to_string()),
-                    ]),
-                ]),
-                Sexp::List(vec![
-                    Sexp::Sym("rec".to_string()),
-                    Sexp::List(vec![
-                        Sexp::Sym("orgx-capture-shell--insert-entry".to_string()),
                         Sexp::Sym("f".to_string()),
-                        Sexp::Sym("h".to_string()),
-                        Sexp::Sym("entry".to_string()),
+                        Sexp::List(vec![
+                            Sexp::Sym("expand-file-name".to_string()),
+                            Sexp::Str(file.to_string()),
+                        ]),
                     ]),
-                ]),
-            ]),
-            Sexp::List(vec![
-                Sexp::Sym("format".to_string()),
-                Sexp::Str("Captured -> [%s%s] %s".to_string()),
-                Sexp::List(vec![
-                    Sexp::Sym("file-name-nondirectory".to_string()),
-                    Sexp::Sym("f".to_string()),
-                ]),
-                Sexp::List(vec![
-                    Sexp::Sym("if".to_string()),
-                    Sexp::Sym("h".to_string()),
                     Sexp::List(vec![
-                        Sexp::Sym("format".to_string()),
-                        Sexp::Str(":%s".to_string()),
                         Sexp::Sym("h".to_string()),
+                        if headline.is_empty() {
+                            Sexp::Sym("nil".to_string())
+                        } else {
+                            Sexp::Str(headline.to_string())
+                        },
                     ]),
-                    Sexp::Str("".to_string()),
+                    Sexp::List(vec![
+                        Sexp::Sym("tpl".to_string()),
+                        quote(Sexp::Sym(template.to_string())),
+                    ]),
+                    Sexp::List(vec![
+                        Sexp::Sym("entry".to_string()),
+                        Sexp::List(vec![
+                            Sexp::Sym("orgx-capture-shell--format-entry".to_string()),
+                            Sexp::Str(text.to_string()),
+                            Sexp::Sym("tpl".to_string()),
+                        ]),
+                    ]),
+                    Sexp::List(vec![
+                        Sexp::Sym("rec".to_string()),
+                        Sexp::List(vec![
+                            Sexp::Sym("orgx-capture-shell--insert-entry".to_string()),
+                            Sexp::Sym("f".to_string()),
+                            Sexp::Sym("h".to_string()),
+                            Sexp::Sym("entry".to_string()),
+                        ]),
+                    ]),
                 ]),
-                Sexp::Sym("entry".to_string()),
-            ]),
+                Sexp::List(vec![
+                    Sexp::Sym("format".to_string()),
+                    Sexp::Str("Captured -> [%s%s] %s".to_string()),
+                    Sexp::List(vec![
+                        Sexp::Sym("file-name-nondirectory".to_string()),
+                        Sexp::Sym("f".to_string()),
+                    ]),
+                    Sexp::List(vec![
+                        Sexp::Sym("if".to_string()),
+                        Sexp::Sym("h".to_string()),
+                        Sexp::List(vec![
+                            Sexp::Sym("format".to_string()),
+                            Sexp::Str(":%s".to_string()),
+                            Sexp::Sym("h".to_string()),
+                        ]),
+                        Sexp::Str("".to_string()),
+                    ]),
+                    Sexp::Sym("entry".to_string()),
+                ]),
             ]),
         ]);
 
-        let res = self.eval(&form).map_err(|e| format!("Capture error: {}", e))?;
+        let res = self
+            .eval(&form)
+            .map_err(|e| format!("Capture error: {}", e))?;
         Ok(res.trim().trim_matches('"').to_string())
     }
 
@@ -150,9 +157,7 @@ impl EmacsClient {
                 Sexp::Sym("require".to_string()),
                 quote(Sexp::Sym("orgx-capture-shell".to_string())),
             ]),
-            Sexp::List(vec![
-                Sexp::Sym("orgx-capture-shell--undo-last".to_string()),
-            ]),
+            Sexp::List(vec![Sexp::Sym("orgx-capture-shell--undo-last".to_string())]),
         ]);
         let res = self.eval(&form).map_err(|e| format!("Undo error: {}", e))?;
         Ok(res.trim().trim_matches('"').to_string())
@@ -208,7 +213,9 @@ fn resolve_target_string(explicit: Option<&str>) -> Result<String, String> {
 
     #[cfg(unix)]
     {
-        extern "C" { fn geteuid() -> u32; }
+        extern "C" {
+            fn geteuid() -> u32;
+        }
         let uid = unsafe { geteuid() };
 
         let run_sock = format!("/run/user/{}/emacs/{}", uid, server_name);
@@ -217,7 +224,9 @@ fn resolve_target_string(explicit: Option<&str>) -> Result<String, String> {
         }
 
         let tmp_base = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".to_string());
-        let tmp_sock = PathBuf::from(tmp_base).join(format!("emacs{}", uid)).join(&server_name);
+        let tmp_sock = PathBuf::from(tmp_base)
+            .join(format!("emacs{}", uid))
+            .join(&server_name);
         if tmp_sock.exists() {
             return Ok(tmp_sock.to_string_lossy().into_owned());
         }
@@ -250,6 +259,9 @@ mod tests {
         let lines: Vec<&str> = content.lines().collect();
         let host_port = lines[0].split_whitespace().next().unwrap();
         let key = lines[1].trim();
-        assert_eq!(format!("{}:{}", host_port, key), "127.0.0.1:43171:Uv<Q'Su7<!*7z~[qk'r_;r.hX4gSX1umT#Qd\"\"LPD0uG!PFcOcl8O5il;S\\M/+Eq");
+        assert_eq!(
+            format!("{}:{}", host_port, key),
+            "127.0.0.1:43171:Uv<Q'Su7<!*7z~[qk'r_;r.hX4gSX1umT#Qd\"\"LPD0uG!PFcOcl8O5il;S\\M/+Eq"
+        );
     }
 }

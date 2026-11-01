@@ -22,7 +22,12 @@ enum Commands {
         file: Option<String>,
         #[arg(short = 'H', long, help = "Target headline")]
         headline: Option<String>,
-        #[arg(short, long, default_value = "task", help = "Template (task, note, journal, plain)")]
+        #[arg(
+            short,
+            long,
+            default_value = "task",
+            help = "Template (task, note, journal, plain)"
+        )]
         template: String,
         #[arg(help = "Entry text to capture")]
         text: Vec<String>,
@@ -54,7 +59,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let (def_file, def_hl) = client.resolve_default_target(".")?;
             println!("Default capture target: {} [{}]", def_file, def_hl);
         }
-        Some(Commands::Capture { file, headline, template, text }) => {
+        Some(Commands::Capture {
+            file,
+            headline,
+            template,
+            text,
+        }) => {
             let (def_file, def_hl) = client.resolve_default_target(".")?;
             let target_file = file.unwrap_or(def_file);
             let target_hl = headline.unwrap_or(def_hl);
@@ -76,7 +86,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let res = client.capture(&target_file, &target_hl, &template, &entry_text)?;
             println!("{}", res);
         }
-        Some(Commands::Repl { file, headline, template }) => {
+        Some(Commands::Repl {
+            file,
+            headline,
+            template,
+        }) => {
             repl::run_repl(&client, file, headline, template)?;
         }
         None => {

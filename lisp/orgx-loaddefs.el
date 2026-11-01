@@ -41,7 +41,7 @@ When optional TAG is supplied, search for that tag instead.
 (autoload 'orgx-mode "orgx"
 "Personal org-mode keybindings and buffer setup.
 
-Activates `orgx-minor-mode-commands-map' under C-c o.
+Activates `orgx-commands-map' under C-c o.
 
 This is a minor mode.  If called interactively, toggle the `Orgx mode'
 mode.  If the prefix argument is positive, enable the mode, and if it is
@@ -58,10 +58,8 @@ The mode's hook is called both when the mode is enabled and when it is
 disabled.
 
 (fn &optional ARG)" t)
-(defalias 'orgx-minor-mode #'orgx-mode)
 (autoload 'orgx-mode-turn-on "orgx"
 "Enable `orgx-mode' in the current buffer.")
-(defalias 'orgx-minor-mode-turn-on #'orgx-mode-turn-on)
 (autoload 'orgx-agenda-minor-mode "orgx"
 "Personal org-agenda keybindings and setup.
 

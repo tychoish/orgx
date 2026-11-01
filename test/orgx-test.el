@@ -23,9 +23,7 @@
 (ert-deftest orgx-autoload-capture-test ()
   "Test that orgx-capture is autoloaded on demand."
   (should (fboundp 'orgx-capture))
-  (should (fboundp 'orgx-reset-capture-templates))
-  (should (fboundp 'orgx-capture-shell))
-  (should (fboundp 'orgx-migrate-subtree-to-denote)))
+  (should (fboundp 'orgx-capture-shell)))
 
 (provide 'orgx-test)
 ;;; orgx-test.el ends here

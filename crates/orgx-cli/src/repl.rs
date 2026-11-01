@@ -1,9 +1,9 @@
+use reedline::{
+    DefaultCompleter, FileBackedHistory, Prompt, PromptEditMode, PromptHistorySearch, Reedline,
+    Signal,
+};
 use std::borrow::Cow;
 use std::path::PathBuf;
-use reedline::{
-    DefaultCompleter, FileBackedHistory, Prompt, PromptEditMode, PromptHistorySearch,
-    Reedline, Signal,
-};
 
 use crate::emacs::EmacsClient;
 
@@ -67,7 +67,8 @@ pub fn run_repl(
     };
     let _ = std::fs::create_dir_all(&cache_dir);
     let history_file = cache_dir.join("history");
-    let history: Box<dyn reedline::History> = match FileBackedHistory::with_file(1000, history_file) {
+    let history: Box<dyn reedline::History> = match FileBackedHistory::with_file(1000, history_file)
+    {
         Ok(f) => Box::new(f),
         Err(_) => Box::new(reedline::FileBackedHistory::default()),
     };
@@ -105,8 +106,8 @@ pub fn run_repl(
                     continue;
                 }
 
-                if trimmed.starts_with('/') {
-                    let parts: Vec<&str> = trimmed[1..].split_whitespace().collect();
+                if let Some(cmd_str) = trimmed.strip_prefix('/') {
+                    let parts: Vec<&str> = cmd_str.split_whitespace().collect();
                     if parts.is_empty() {
                         continue;
                     }
@@ -144,18 +145,24 @@ pub fn run_repl(
                                 println!("Template switched to: {}", current_template);
                             }
                         }
-                        "undo" => {
-                            match client.undo() {
-                                Ok(msg) => println!("{}", msg),
-                                Err(e) => eprintln!("Error undoing: {}", e),
-                            }
-                        }
+                        "undo" => match client.undo() {
+                            Ok(msg) => println!("{}", msg),
+                            Err(e) => eprintln!("Error undoing: {}", e),
+                        },
                         other => {
-                            println!("Unknown command: /{} (type /help for available commands)", other);
+                            println!(
+                                "Unknown command: /{} (type /help for available commands)",
+                                other
+                            );
                         }
                     }
                 } else {
-                    match client.capture(&current_file, &current_headline, &current_template, trimmed) {
+                    match client.capture(
+                        &current_file,
+                        &current_headline,
+                        &current_template,
+                        trimmed,
+                    ) {
                         Ok(msg) => println!("{}", msg),
                         Err(e) => eprintln!("Capture error: {}", e),
                     }

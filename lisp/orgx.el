@@ -12,7 +12,7 @@
 ;; - Agenda file management, reload, and scoping commands
 ;; - Custom speed commands and headline navigation
 ;; - Archive management and completed task refiling
-;; - Minor mode (`orgx-minor-mode') with unified keymap under `C-c o'
+;; - Minor mode (`orgx-mode') with unified keymap under `C-c o'
 ;; - Global keymap (`orgx-global-map')
 
 ;;; Code:
@@ -60,7 +60,6 @@
 
 (defvar org-link-parameters)
 (defvar org-stored-links)
-(defvar orgx-minor-mode)
 (defvar org-state)
 (defvar org-last-state)
 (defvar orgx-agenda-minor-mode)
@@ -461,56 +460,56 @@ When optional TAG is supplied, search for that tag instead."
 
 ;;; Keymaps and minor modes
 
-(defvar-keymap orgx-minor-mode-capture-map
+(defvar-keymap orgx-capture-map
   :name "orgx-capture"
-  :doc "Capture commands under C-c o c (orgx-minor-mode).")
+  :doc "Capture commands under C-c o c (orgx-mode).")
 
-(keymap-set orgx-minor-mode-capture-map "c" #'orgx-capture)
-(keymap-set orgx-minor-mode-capture-map "m" #'org-capture)
-(keymap-set orgx-minor-mode-capture-map "p" #'org-capture-goto-last-stored)
-(keymap-set orgx-minor-mode-capture-map "l" #'org-capture-goto-last-stored)
-(keymap-set orgx-minor-mode-capture-map "t" #'orgx-capture-shell-toggle)
-(keymap-set orgx-minor-mode-capture-map "r" #'org-capture-refile)
-(keymap-set orgx-minor-mode-capture-map "w" #'org-capture-refile)
-(keymap-set orgx-minor-mode-capture-map "s" #'orgx-capture-shell)
-(keymap-set orgx-minor-mode-capture-map "C-t" #'orgx-capture-shell-transient)
+(keymap-set orgx-capture-map "c" #'orgx-capture)
+(keymap-set orgx-capture-map "m" #'org-capture)
+(keymap-set orgx-capture-map "p" #'org-capture-goto-last-stored)
+(keymap-set orgx-capture-map "l" #'org-capture-goto-last-stored)
+(keymap-set orgx-capture-map "t" #'orgx-capture-shell-toggle)
+(keymap-set orgx-capture-map "r" #'org-capture-refile)
+(keymap-set orgx-capture-map "w" #'org-capture-refile)
+(keymap-set orgx-capture-map "s" #'orgx-capture-shell)
+(keymap-set orgx-capture-map "C-t" #'orgx-capture-shell-transient)
 
-(defvar-keymap orgx-minor-mode-archive-map
+(defvar-keymap orgx-archive-map
   :name "orgx-archive"
-  :doc "Archive commands under C-c o C-f (orgx-minor-mode).")
+  :doc "Archive commands under C-c o C-f (orgx-mode).")
 
-(keymap-set orgx-minor-mode-archive-map "e" #'org-cycle-force-archived)
-(keymap-set orgx-minor-mode-archive-map "t" #'org-archive-set-tag)
-(keymap-set orgx-minor-mode-archive-map "s" (cons "current→sibling" #'org-archive-to-archive-sibling))
-(keymap-set orgx-minor-mode-archive-map "d" (cons "done+archive" #'orgx-mark-done-and-archive))
+(keymap-set orgx-archive-map "e" #'org-cycle-force-archived)
+(keymap-set orgx-archive-map "t" #'org-archive-set-tag)
+(keymap-set orgx-archive-map "s" (cons "current→sibling" #'org-archive-to-archive-sibling))
+(keymap-set orgx-archive-map "d" (cons "done+archive" #'orgx-mark-done-and-archive))
 
-(defvar-keymap orgx-minor-mode-commands-map
+(defvar-keymap orgx-commands-map
   :name "orgx-commands"
-  :doc "Command keymap for `orgx-minor-mode' mounted under C-c o.")
+  :doc "Command keymap for `orgx-mode' mounted under C-c o.")
 
-(keymap-set orgx-minor-mode-commands-map "a" #'orgx-agenda-view)
-(keymap-set orgx-minor-mode-commands-map "d" #'orgx-date-now)
-(keymap-set orgx-minor-mode-commands-map "h" #'consult-org-heading)
-(keymap-set orgx-minor-mode-commands-map "k" #'org-capture)
-(keymap-set orgx-minor-mode-commands-map "n" #'org-narrow-to-subtree)
-(keymap-set orgx-minor-mode-commands-map "o" #'orgx-agenda-files-open)
-(keymap-set orgx-minor-mode-commands-map "p" #'org-insert-property-drawer)
-(keymap-set orgx-minor-mode-commands-map "q" #'agent-shell-queue-org-refile-from-heading)
-(keymap-set orgx-minor-mode-commands-map "r" #'orgx-agenda-files-reload)
-(keymap-set orgx-minor-mode-commands-map "s" #'org-save-all-org-buffers)
-(keymap-set orgx-minor-mode-commands-map "C-s" #'orgx-capture-shell-toggle)
-(keymap-set orgx-minor-mode-commands-map "C-t" #'orgx-capture-shell-transient)
-(keymap-set orgx-minor-mode-commands-map "t" #'org-set-tags-command)
-(keymap-set orgx-minor-mode-commands-map "u" #'orgx-agenda-untagged-in-file)
-(keymap-set orgx-minor-mode-commands-map "w" #'org-refile)
-(keymap-set orgx-minor-mode-commands-map "/" #'orgx-agenda-for-file)
-(keymap-set orgx-minor-mode-commands-map "c" orgx-minor-mode-capture-map)
-(keymap-set orgx-minor-mode-commands-map "C-f" orgx-minor-mode-archive-map)
+(keymap-set orgx-commands-map "a" #'orgx-agenda-view)
+(keymap-set orgx-commands-map "d" #'orgx-date-now)
+(keymap-set orgx-commands-map "h" #'consult-org-heading)
+(keymap-set orgx-commands-map "k" #'org-capture)
+(keymap-set orgx-commands-map "n" #'org-narrow-to-subtree)
+(keymap-set orgx-commands-map "o" #'orgx-agenda-files-open)
+(keymap-set orgx-commands-map "p" #'org-insert-property-drawer)
+(keymap-set orgx-commands-map "q" #'agent-shell-queue-org-refile-from-heading)
+(keymap-set orgx-commands-map "r" #'orgx-agenda-files-reload)
+(keymap-set orgx-commands-map "s" #'org-save-all-org-buffers)
+(keymap-set orgx-commands-map "C-s" #'orgx-capture-shell-toggle)
+(keymap-set orgx-commands-map "C-t" #'orgx-capture-shell-transient)
+(keymap-set orgx-commands-map "t" #'org-set-tags-command)
+(keymap-set orgx-commands-map "u" #'orgx-agenda-untagged-in-file)
+(keymap-set orgx-commands-map "w" #'org-refile)
+(keymap-set orgx-commands-map "/" #'orgx-agenda-for-file)
+(keymap-set orgx-commands-map "c" orgx-capture-map)
+(keymap-set orgx-commands-map "C-f" orgx-archive-map)
 
-(defvar-keymap orgx-minor-mode-map
+(defvar-keymap orgx-mode-map
   :doc "Buffer-local minor mode keymap activating commands under C-c o.")
 
-(keymap-set orgx-minor-mode-map "C-c o" orgx-minor-mode-commands-map)
+(keymap-set orgx-mode-map "C-c o" orgx-commands-map)
 
 (defun orgx--set-up-buffer ()
   "Configure buffer settings for `orgx-mode'."
@@ -540,23 +539,17 @@ When optional TAG is supplied, search for that tag instead."
 ;;;###autoload
 (define-minor-mode orgx-mode
   "Personal org-mode keybindings and buffer setup.
-Activates `orgx-minor-mode-commands-map' under C-c o."
+Activates `orgx-commands-map' under C-c o."
   :lighter " ox"
-  :keymap orgx-minor-mode-map
+  :keymap orgx-mode-map
   (if orgx-mode
       (orgx--set-up-buffer)
     (orgx--tear-down-buffer)))
 
 ;;;###autoload
-(defalias 'orgx-minor-mode #'orgx-mode)
-
-;;;###autoload
 (defun orgx-mode-turn-on ()
   "Enable `orgx-mode' in the current buffer."
   (orgx-mode 1))
-
-;;;###autoload
-(defalias 'orgx-minor-mode-turn-on #'orgx-mode-turn-on)
 
 ;;; orgx-agenda-minor-mode
 
@@ -585,24 +578,11 @@ Activates `orgx-minor-mode-commands-map' under C-c o."
   (orgx-agenda-minor-mode 1))
 
 
-;;; Convenience aliases across orgx modules
-
-(defalias 'orgx-reset-capture-templates #'orgx-capture-reset-templates)
-(defalias 'orgx-add-project-file-capture-templates #'orgx-capture-add-project-file-templates)
-(defalias 'orgx-setup-standard-capture-templates #'orgx-capture-setup-standard-templates)
-(defalias 'orgx--setup-standard-capture-templates #'orgx-setup-standard-capture-templates)
-(defalias 'orgx-migrate-subtree-to-denote #'orgx-denote-migrate-subtree)
-(defalias 'orgx-refile-to-denote #'orgx-denote-migrate-subtree)
-(defalias 'orgx-agenda-denote-todos #'orgx-denote-agenda-todos)
-(defalias 'orgx-agenda-denote-questions #'orgx-denote-agenda-questions)
-(defalias 'orgx-agenda-denote-composite #'orgx-denote-agenda-composite)
-(defalias 'orgx-agenda-denote-completed-plans #'orgx-denote-agenda-completed-plans)
-
 ;;;###autoload
 (defun orgx-setup ()
   "Centrally initialize and wire orgx features, templates, and agenda integration."
   (interactive)
-  (orgx-setup-standard-capture-templates)
+  (orgx-capture-setup-standard-templates)
   (when (require 'orgx-denote nil t)
     (orgx-denote-setup-agenda-commands)))
 

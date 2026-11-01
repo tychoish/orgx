@@ -26,13 +26,22 @@ jobs:
 
       - name: Lint Source Code
         uses: tychoish/elisp-ci/lint@main
+        with:
+          load-paths: "lisp"
+          target-files: "lisp/orgx.el lisp/orgx-capture.el lisp/orgx-capture-shell.el lisp/orgx-denote.el"
 
       - name: Run ERT Tests
         uses: tychoish/elisp-ci@main
+        with:
+          load-paths: "lisp test"
+          test-files: "test/*-test.el"
 
       - name: Measure Code Coverage
         uses: tychoish/elisp-ci/coverage@main
         with:
+          load-paths: "lisp test"
+          source-files: "lisp/orgx.el lisp/orgx-capture.el lisp/orgx-capture-shell.el lisp/orgx-denote.el"
+          test-files: "test/*-test.el"
           report-format: "lcov"
           output-file: "coverage/lcov.info"
 

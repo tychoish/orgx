@@ -319,7 +319,7 @@ Returns a record (FILE MARKER-POS ENTRY-TEXT) for the undo ring."
         (let* ((formatted (orgx-capture-shell--format-entry
                            trimmed
                            orgx-capture-shell-current-template))
-               (rec (orgx-capture-shell--insert-entry
+               (_ (orgx-capture-shell--insert-entry
                      orgx-capture-shell-current-file
                      orgx-capture-shell-current-headline
                      formatted)))

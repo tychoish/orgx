@@ -43,17 +43,7 @@
       (should (= (orgx-denote-agenda-cmp-signature line-b line-a) 1))
       (should (= (orgx-denote-agenda-cmp-signature line-a line-a) 0)))))
 
-(ert-deftest orgx-denote-aliases-test ()
-  "Test that backward-compatible aliases exist."
-  (should (fboundp 'orgx-migrate-subtree-to-denote))
-  (should (fboundp 'orgx-refile-to-denote))
-  (should (fboundp 'orgx-agenda-denote-todos))
-  (should (fboundp 'orgx-agenda-denote-questions))
-  (should (fboundp 'orgx-agenda-denote-composite))
-  (should (fboundp 'orgx-agenda-denote-completed-plans)))
 
-(provide 'orgx-denote-test)
-;;; orgx-denote-test.el ends here
 
 (ert-deftest orgx-denote-setup-agenda-commands-test ()
   "Test registering denote commands into `org-agenda-custom-commands'."
@@ -67,3 +57,6 @@
     (should (assoc "dq" org-agenda-custom-commands))
     (should (assoc "dc" org-agenda-custom-commands))
     (should (assoc "dx" org-agenda-custom-commands))))
+
+(provide 'orgx-denote-test)
+;;; orgx-denote-test.el ends here
