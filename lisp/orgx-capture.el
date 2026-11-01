@@ -77,8 +77,6 @@
                                       (call-interactively
                                        #'agent-shell-queue-capture-from-context))))))
 
-(with-eval-after-load 'org-capture
-  (orgx-capture-setup-asq-template))
 
 ;;; Reset and helper functions
 

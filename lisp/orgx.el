@@ -111,8 +111,6 @@ When SHORT is non-nil, format as date-only."
         (funcall fn (format "[#%c] %s" (cdr cell) str) hash))
     (funcall fn str hash)))
 
-(advice-add 'toc-org-insert-toc :around #'orgx--toc-bind-priorities)
-(advice-add 'toc-org-hrefify-gh :around #'orgx--toc-hrefify-priority)
 
 (declare-function revbufs "revbufs")
 
@@ -200,7 +198,6 @@ Updates `local-notes-directory', `org-directory', `org-agenda-files',
   (orgx--background-revbufs)
   (apply orig-fun args))
 
-(advice-add 'org-agenda-redo :around #'orgx--ad-org-agenda-redo)
 
 ;;; Task status and archiving
 
@@ -497,8 +494,6 @@ When optional TAG is supplied, search for that tag instead."
       (org-fold-show-context)
       t)))
 
-(advice-add 'org-link-open-as-file :around #'orgx-link-github-line-support)
-(add-hook 'org-open-link-functions #'orgx-open-custom-id-slug-fallback)
 
 ;;; Auxiliary packages and export tools
 
@@ -511,7 +506,6 @@ When optional TAG is supplied, search for that tag instead."
 (autoload 'org-leanpub-book-export-markdown "ox-leanpub" nil t)
 
 (defvar org-rst-headline-underline-characters)
-(setq org-rst-headline-underline-characters (list ?= ?- ?~ ?' ?^ ?`))
 
 (defun orgx-gist-export-private ()
   "Export current Org buffer or region to a private Gist."
@@ -853,7 +847,8 @@ Activates `orgx-command-map' under C-c o."
     (add-to-list 'org-src-lang-modes '("rust" . rust))))
 
 (defvar orgx-global--managed-settings
-  `((org-modules . ,orgx-default-modules)
+  `((org-rst-headline-underline-characters . ,(list ?= ?- ?~ ?' ?^ ?`))
+    (org-modules . ,orgx-default-modules)
     (org-todo-keywords . ,orgx-todo-keywords)
     (org-tag-alist . ,orgx-tag-alist)
     (org-todo-keyword-faces . ,(orgx--default-todo-faces))
@@ -908,11 +903,28 @@ Activates `orgx-command-map' under C-c o."
         (makunbound sym))))
   (setq orgx-global--saved-settings nil))
 
+(defun orgx--enable-advice ()
+  "Enable orgx advice and link hooks."
+  (advice-add 'toc-org-insert-toc :around #'orgx--toc-bind-priorities)
+  (advice-add 'toc-org-hrefify-gh :around #'orgx--toc-hrefify-priority)
+  (advice-add 'org-agenda-redo :around #'orgx--ad-org-agenda-redo)
+  (advice-add 'org-link-open-as-file :around #'orgx-link-github-line-support)
+  (add-hook 'org-open-link-functions #'orgx-open-custom-id-slug-fallback))
+
+(defun orgx--disable-advice ()
+  "Disable orgx advice and link hooks."
+  (advice-remove 'toc-org-insert-toc #'orgx--toc-bind-priorities)
+  (advice-remove 'toc-org-hrefify-gh #'orgx--toc-hrefify-priority)
+  (advice-remove 'org-agenda-redo #'orgx--ad-org-agenda-redo)
+  (advice-remove 'org-link-open-as-file #'orgx-link-github-line-support)
+  (remove-hook 'org-open-link-functions #'orgx-open-custom-id-slug-fallback))
+
 ;;;###autoload
 (defun orgx-setup ()
   "Centrally initialize and wire orgx features, templates, and agenda integration."
   (interactive)
   (orgx-global--apply-settings)
+  (orgx--enable-advice)
   (org-load-modules-maybe t)
   (orgx-babel-setup)
   (add-hook 'org-mode-hook #'orgx-mode-turn-on)
@@ -936,9 +948,11 @@ When disabled, reverts managed configuration settings and removes hooks."
   (if orgx-global-mode
       (progn
         (orgx-setup)
+        (orgx--enable-advice)
         (add-hook 'org-mode-hook #'orgx-mode-turn-on)
         (add-hook 'org-capture-mode-hook #'orgx-mode-turn-on)
         (add-hook 'org-agenda-mode-hook #'orgx-agenda-minor-mode-turn-on))
+    (orgx--disable-advice)
     (orgx-global--revert-settings)
     (remove-hook 'org-mode-hook #'orgx-mode-turn-on)
     (remove-hook 'org-capture-mode-hook #'orgx-mode-turn-on)

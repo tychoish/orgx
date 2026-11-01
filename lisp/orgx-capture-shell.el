@@ -126,8 +126,6 @@ that file and headline are used as the default target."
     (unless (assoc (car rule) display-buffer-alist)
       (add-to-list 'display-buffer-alist rule))))
 
-(when orgx-capture-shell-window-rule
-  (orgx-capture-shell-register-window-rule))
 
 ;;; Core capture engine
 
@@ -388,6 +386,8 @@ Returns a record (FILE MARKER-POS ENTRY-TEXT) for the undo ring."
 (defun orgx-capture-shell ()
   "Start or switch to the `orgx-capture-shell' REPL."
   (interactive)
+  (when orgx-capture-shell-window-rule
+    (orgx-capture-shell-register-window-rule))
   (let ((buf (get-buffer-create orgx-capture-shell-buffer-name)))
     (with-current-buffer buf
       (unless (derived-mode-p 'orgx-capture-shell-mode)
