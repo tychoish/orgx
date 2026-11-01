@@ -327,9 +327,12 @@ into `org-load-hook'."
                (list key (format "%s (project; %s)" name (file-name-nondirectory path)))
                t)
 
-  (when-let* ((file-dir (file-name-directory path))
-              (_ (boundp 'org-directory))
-              (_ (not (string-equal file-dir (expand-file-name org-directory)))))
+  (when (and (boundp 'org-directory)
+             org-directory
+             (let ((file-dir (file-name-directory path)))
+               (and file-dir
+                    (not (string-equal (expand-file-name file-dir)
+                                       (expand-file-name org-directory))))))
     (when (boundp 'org-agenda-files)
       (add-to-list 'org-agenda-files path)))
 

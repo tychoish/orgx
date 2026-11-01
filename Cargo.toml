@@ -9,7 +9,3 @@ version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 authors = ["tychoish"]
-
-[patch."https://github.com/tychoish/sprite.git"]
-# Local sibling development override for sprite-direct:
-sprite-direct = { path = "../sprite/rust" }

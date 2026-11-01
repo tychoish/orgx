@@ -582,6 +582,7 @@ checksum = "d0d5d4b1981b8bbbb7aed204cae5726d683d5d6ac7e74ec54122ea28f315e7c8"
 [[package]]
 name = "sprite-direct"
 version = "0.1.0"
+source = "git+https://github.com/tychoish/sprite.git#2cb438cecab1508e6b585626ee01789c641be183"
 
 [[package]]
 name = "strip-ansi-escapes"

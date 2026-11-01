@@ -450,14 +450,26 @@ window.  If it is hidden or not active, display it in the bottom popup window."
     (user-error "Denote is not available")))
 
 ;;;###autoload (autoload 'orgx-capture-shell-transient "orgx-capture-shell" nil t)
+(defun orgx-capture-shell-undo-command ()
+  "Undo the last capture performed in the shell."
+  (interactive)
+  (message "%s" (orgx-capture-shell--undo-last)))
+
+(defun orgx-capture-shell-visit-target-command ()
+  "Visit the current capture target file in a buffer."
+  (interactive)
+  (when orgx-capture-shell-current-file
+    (find-file orgx-capture-shell-current-file)))
+
+;;;###autoload (autoload 'orgx-capture-shell-transient "orgx-capture-shell" nil t)
 (transient-define-prefix orgx-capture-shell-transient ()
   "Transient menu for orgx capture shell operations."
   ["Orgx Capture Shell"
    ["Actions"
     ("s" "Launch / Focus Shell" orgx-capture-shell)
     ("t" "Toggle Popup Window" orgx-capture-shell-toggle)
-    ("u" "Undo Last Capture" (lambda () (interactive) (message "%s" (orgx-capture-shell--undo-last))))
-    ("o" "Visit Current Target" (lambda () (interactive) (when orgx-capture-shell-current-file (find-file orgx-capture-shell-current-file))))]
+    ("u" "Undo Last Capture" orgx-capture-shell-undo-command)
+    ("o" "Visit Current Target" orgx-capture-shell-visit-target-command)]
    ["Switch Modality"
     ("f" "Set Target File" orgx-capture-shell-set-target-file)
     ("m" "Set Template" orgx-capture-shell-set-template)
