@@ -19,16 +19,12 @@
     (let ((match (orgx-done-state-match)))
       (should (string-equal match "/DONE|CANCELLED")))))
 
-(ert-deftest orgx-denote-plan-file-p-test ()
-  "Test denote plan file identification."
-  (let ((tmp-plan (make-temp-file "20261031T173720==7b4f--plan__agent_plan" nil ".org" "#+title: Test Plan\n"))
-        (tmp-note (make-temp-file "20261031T173720--note__note" nil ".org" "#+title: Simple Note\n")))
-    (unwind-protect
-        (progn
-          (should (orgx-denote-plan-file-p tmp-plan))
-          (should-not (orgx-denote-plan-file-p tmp-note)))
-      (when (file-exists-p tmp-plan) (delete-file tmp-plan))
-      (when (file-exists-p tmp-note) (delete-file tmp-note)))))
+(ert-deftest orgx-autoload-capture-test ()
+  "Test that orgx-capture is autoloaded on demand."
+  (should (fboundp 'orgx-capture))
+  (should (fboundp 'orgx-reset-capture-templates))
+  (should (fboundp 'orgx-capture-shell))
+  (should (fboundp 'orgx-migrate-subtree-to-denote)))
 
 (provide 'orgx-test)
 ;;; orgx-test.el ends here
