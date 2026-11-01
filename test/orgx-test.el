@@ -67,3 +67,38 @@
   (should (eq orgx-minor-mode-commands-map orgx-commands-map))
   (should (eq orgx-minor-mode-archive-map orgx-archive-map))
   (should (eq orgx-minor-mode-capture-map orgx-capture-map)))
+
+
+(ert-deftest orgx-global-minor-mode-test ()
+  "Test that activating orgx-global-minor-mode runs setup and sets hooks."
+  (let ((hook-run nil)
+        (orgx--setup-done nil))
+    (add-hook 'orgx-setup-hook (lambda () (setq hook-run t)))
+    (unwind-protect
+        (progn
+          (orgx-global-minor-mode 1)
+          (should orgx-global-mode)
+          (should orgx--setup-done)
+          (should hook-run)
+          (should (memq #'orgx-mode-turn-on org-mode-hook))
+          (should (memq #'orgx-agenda-minor-mode-turn-on org-agenda-mode-hook))
+          (should (memq #'orgx-mode-turn-on org-capture-mode-hook))
+          (orgx-global-minor-mode -1)
+          (should-not orgx-global-mode)
+          (should-not (memq #'orgx-mode-turn-on org-mode-hook)))
+      (setq orgx-setup-hook nil)
+      (orgx-global-minor-mode -1))))
+
+(ert-deftest orgx-mode-triggers-setup-test ()
+  "Test that activating orgx-mode triggers orgx-setup if not already done."
+  (let ((orgx--setup-done nil)
+        (hook-called nil))
+    (add-hook 'orgx-setup-hook (lambda () (setq hook-called t)))
+    (unwind-protect
+        (with-temp-buffer
+          (org-mode)
+          (orgx-mode 1)
+          (should orgx--setup-done)
+          (should hook-called)
+          (orgx-mode -1))
+      (setq orgx-setup-hook nil))))
