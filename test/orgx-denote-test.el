@@ -58,5 +58,16 @@
     (should (assoc "dc" org-agenda-custom-commands))
     (should (assoc "dx" org-agenda-custom-commands))))
 
+(ert-deftest orgx-denote-setup-capture-templates-test ()
+  "Test registering denote capture templates."
+  (let ((org-capture-templates nil))
+    (cl-letf (((symbol-function 'denote-org-capture) #'ignore)
+              ((symbol-function 'denote-journal-capture-entry-today) #'ignore)
+              ((symbol-function 'denote-journal-capture-entry-for-date) #'ignore))
+      (orgx-denote-setup-capture-templates)
+      (should (assoc "dn" org-capture-templates))
+      (should (assoc "dj" org-capture-templates))
+      (should (assoc "dJ" org-capture-templates)))))
+
 (provide 'orgx-denote-test)
 ;;; orgx-denote-test.el ends here

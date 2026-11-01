@@ -51,5 +51,15 @@
     (should (assoc "pj" org-capture-templates))
     (should (assoc "pt" org-capture-templates))))
 
+(ert-deftest orgx-capture-populates-templates-test ()
+  "Test that orgx-capture populates org-capture-templates if empty."
+  (let ((org-capture-templates nil)
+        (captured nil))
+    (cl-letf (((symbol-function 'org-capture)
+               (lambda (&rest _)
+                 (setq captured org-capture-templates))))
+      (orgx-capture)
+      (should (assoc "tt" captured)))))
+
 (provide 'orgx-capture-test)
 ;;; orgx-capture-test.el ends here
