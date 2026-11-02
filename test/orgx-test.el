@@ -315,5 +315,50 @@
     (org-back-to-heading)
     (should-not (orgx-skip-child-of-project-tag))))
 
+(ert-deftest orgx-agenda-switch-buffer-test ()
+  "orgx-agenda-switch-buffer offers only org-mode/org-agenda-mode buffers
+and switches to the one selected via `annotated-completing-read'."
+  (let (org-buf other-buf captured-candidates switched-to)
+    (unwind-protect
+        (progn
+          (setq org-buf (generate-new-buffer "orgx-switch-test-org"))
+          (setq other-buf (generate-new-buffer "orgx-switch-test-other"))
+          (with-current-buffer org-buf (org-mode))
+          (cl-letf (((symbol-function 'annotated-completing-read)
+                     (lambda (table &rest _)
+                       (setq captured-candidates (mapcar #'car table))
+                       (buffer-name org-buf)))
+                    ((symbol-function 'switch-to-buffer)
+                     (lambda (buf) (setq switched-to buf))))
+            (orgx-agenda-switch-buffer))
+          (should (member (buffer-name org-buf) captured-candidates))
+          (should-not (member (buffer-name other-buf) captured-candidates))
+          (should (equal (buffer-name org-buf) switched-to)))
+      (when (buffer-live-p org-buf) (kill-buffer org-buf))
+      (when (buffer-live-p other-buf) (kill-buffer other-buf)))))
+
+(ert-deftest orgx-agenda-switch-buffer-errors-without-buffers-test ()
+  "orgx-agenda-switch-buffer signals a user-error when none are open."
+  (cl-letf (((symbol-function 'buffer-list) (lambda () nil)))
+    (should-error (orgx-agenda-switch-buffer) :type 'user-error)))
+
+(ert-deftest orgx-find-heading-test ()
+  "orgx-find-heading jumps to the target chosen via `annotated-completing-read'."
+  (let* ((temp-file (make-temp-file "orgx-find-heading-" nil ".org"))
+         (targets (list (list "Target One" temp-file nil 1)
+                        (list "Target Two" temp-file nil 20))))
+    (unwind-protect
+        (progn
+          (with-temp-file temp-file (insert "* Target One\n* Target Two\n"))
+          (cl-letf (((symbol-function 'org-refile-get-targets) (lambda (&rest _) targets))
+                    ((symbol-function 'annotated-completing-read)
+                     (lambda (&rest _) "Target Two"))
+                    ((symbol-function 'org-fold-show-context) #'ignore))
+            (orgx-find-heading)
+            (should (file-equal-p temp-file (buffer-file-name)))
+            (should (= 20 (point)))))
+      (when (file-exists-p temp-file) (delete-file temp-file))
+      (when-let* ((buf (find-buffer-visiting temp-file))) (kill-buffer buf)))))
+
 (provide 'orgx-test)
 ;;; orgx-test.el ends here
