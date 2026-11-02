@@ -58,6 +58,8 @@
 (declare-function orgx-denote-agenda-completed-plans "orgx-denote")
 
 (defvar orgx-agenda-minor-mode)
+(defvar org-state)
+(defvar org-last-state)
 
 (defgroup orgx nil
   "Org-mode personal extensions."
@@ -142,7 +144,8 @@ When SHORT is non-nil, format as date-only."
 
 ;;;###autoload
 (defun orgx-set-notes-directory (&optional path)
-  "Set the notes directory to PATH (or `local-notes-directory') and update Org paths.
+  "Set the notes directory to PATH and update Org paths.
+If PATH is nil, use `local-notes-directory'.
 Updates `local-notes-directory', `org-directory', `org-agenda-files',
 `org-annotate-file-storage-file', `deft-directory', and `denote-directory'."
   (interactive
@@ -938,9 +941,10 @@ Activates `orgx-command-map' under C-c o."
 ;;;###autoload
 (define-minor-mode orgx-global-mode
   "Global mode for orgx.
-When enabled, runs `orgx-setup', activates `orgx-global-mode-map' (with `C-c o'),
-and automatically enables `orgx-mode' in `org-mode' and `org-capture-mode' buffers,
-and `orgx-agenda-minor-mode' in `org-agenda-mode' buffers.
+When enabled, runs `orgx-setup', activates `orgx-global-mode-map'
+\(with `C-c o'), and automatically enables `orgx-mode' in `org-mode'
+and `org-capture-mode' buffers, and `orgx-agenda-minor-mode' in
+`org-agenda-mode' buffers.
 When disabled, reverts managed configuration settings and removes hooks."
   :global t
   :keymap orgx-global-mode-map
