@@ -58,14 +58,31 @@
     (should (assoc "pt" org-capture-templates))))
 
 (ert-deftest orgx-capture-populates-templates-test ()
-  "Test that orgx-capture populates org-capture-templates if empty."
+  "Test that orgx-capture populates org-capture-templates if empty.
+Passes an explicit KEYS so the interactive `annotated-completing-read'
+template picker is bypassed, same as a scripted/non-interactive caller."
   (let ((org-capture-templates nil)
         (captured nil))
     (cl-letf (((symbol-function 'org-capture)
                (lambda (&rest _)
                  (setq captured org-capture-templates))))
-      (orgx-capture)
+      (orgx-capture nil "tt")
       (should (assoc "tt" captured)))))
+
+(ert-deftest orgx-capture-prompts-for-template-when-keys-omitted-test ()
+  "Test that orgx-capture selects a template via `annotated-completing-read'
+when no KEYS are supplied, and dispatches to it."
+  (let ((org-capture-templates nil)
+        (captured nil))
+    (cl-letf (((symbol-function 'org-capture)
+               (lambda (&rest args) (setq captured args)))
+              ;; Stand in for the real minibuffer prompt: return the
+              ;; description `orgx-capture--select-template' would show
+              ;; for the "tt" template, so its key-table lookup resolves.
+              ((symbol-function 'annotated-completing-read)
+               (lambda (&rest _) (nth 1 (assoc "tt" org-capture-templates)))))
+      (orgx-capture)
+      (should (equal captured '(nil "tt"))))))
 
 (ert-deftest orgx-capture-quick-task-template-test ()
   "orgx-capture-add-task-templates adds tq template with :immediate-finish t."
