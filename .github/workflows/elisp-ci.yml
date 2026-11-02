@@ -29,6 +29,7 @@ jobs:
         with:
           load-paths: "lisp"
           target-files: "lisp/orgx.el lisp/orgx-capture.el lisp/orgx-capture-shell.el lisp/orgx-denote.el"
+          dependencies: "annotated-completing-read"
 
       - name: Run ERT Tests
         uses: tychoish/elisp-ci@main
