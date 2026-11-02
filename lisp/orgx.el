@@ -3,7 +3,7 @@
 ;; Author: tychoish <tychoish@tychoish.com>
 ;; URL: https://github.com/tychoish/orgx
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1") (org "9.6"))
+;; Package-Requires: ((emacs "29.1") (org "9.6") (annotated-completing-read "0.1"))
 ;; Keywords: org, convenience
 
 ;;; Commentary:
@@ -28,6 +28,7 @@
 (require 'org)
 (require 'org-fold)
 (require 'org-capture)
+(require 'annotated-completing-read)
 (require 'org-refile)
 (require 'org-agenda)
 (require 'org-archive)

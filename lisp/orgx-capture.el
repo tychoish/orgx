@@ -3,7 +3,7 @@
 ;; Author: tychoish <tychoish@tychoish.com>
 ;; URL: https://github.com/tychoish/orgx
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1") (org "9.6"))
+;; Package-Requires: ((emacs "29.1") (org "9.6") (annotated-completing-read "0.1"))
 ;; Keywords: org, capture, convenience
 
 ;;; Commentary:
@@ -19,6 +19,7 @@
 (require 'cl-lib)
 (require 'seq)
 (require 'subr-x)
+(require 'annotated-completing-read)
 
 (eval-when-compile
   (require 'org))
@@ -29,7 +30,6 @@
 (declare-function denote-journal-capture-entry-today "denote-journal-capture")
 (declare-function denote-journal-capture-timestamp "denote-journal-capture")
 (declare-function agent-shell-queue-capture-from-context "agent-shell-queue")
-(declare-function annotated-completing-read "annotated-completing-read")
 (declare-function org-agenda-files "org")
 
 (defvar org-capture-templates)
