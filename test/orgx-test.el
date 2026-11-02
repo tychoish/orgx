@@ -296,5 +296,24 @@
   "orgx--auxiliary-packages includes ob-mermaid."
   (should (memq 'ob-mermaid orgx--auxiliary-packages)))
 
+(ert-deftest orgx-skip-child-of-project-tag-case-insensitive-test ()
+  "orgx-skip-child-of-project-tag matches project tags regardless of case."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* TODO Epic Thing :EPIC:\n** TODO Subtask A\n* TODO Standalone Task\n")
+    (goto-char (point-min))
+    (forward-line 1)
+    (org-back-to-heading)
+    (should (orgx-skip-child-of-project-tag))))
+
+(ert-deftest orgx-skip-child-of-project-tag-keeps-tagged-heading-test ()
+  "orgx-skip-child-of-project-tag does not skip the tagged heading itself."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* TODO Epic Thing :EPIC:\n** TODO Subtask A\n")
+    (goto-char (point-min))
+    (org-back-to-heading)
+    (should-not (orgx-skip-child-of-project-tag))))
+
 (provide 'orgx-test)
 ;;; orgx-test.el ends here

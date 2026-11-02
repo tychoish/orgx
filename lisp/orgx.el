@@ -66,8 +66,10 @@
   "Org-mode personal extensions."
   :group 'org)
 
-(defcustom orgx-project-tags '("project" "task" "epic" "plan" "scope" "tracker")
-  "Tags that identify projects for skip functions."
+(defcustom orgx-project-tags '("PROJECT" "EPIC" "project" "task" "epic" "plan" "scope" "tracker")
+  "Tags that identify projects for skip functions.
+Matching against a heading's tags is case-insensitive, so casing here
+is cosmetic; both conventions are listed since real notes use either."
   :type '(repeat string)
   :group 'orgx)
 
@@ -221,12 +223,13 @@ Updates `local-notes-directory', `org-directory', `org-agenda-files',
       (insert (format-time-string "<%Y-%m-%d %a>" time)))))
 
 (defun orgx-skip-child-of-project-tag ()
-  "Skip children of headings tagged with any element of `orgx-project-tags'."
+  "Skip children of headings tagged with any element of `orgx-project-tags'.
+Tag comparison is case-insensitive."
   (save-restriction
     (widen)
     (let (skip)
       (while (and (not skip) (org-up-heading-safe))
-        (when (seq-intersection orgx-project-tags (org-get-tags nil t))
+        (when (seq-intersection orgx-project-tags (org-get-tags nil t) #'string-equal-ignore-case)
           (setq skip (save-excursion (org-end-of-subtree t) (point)))))
       skip)))
 
