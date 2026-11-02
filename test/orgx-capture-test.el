@@ -35,7 +35,13 @@
     ;; Check that note, journal, and task templates were registered
     (should (assoc "nn" org-capture-templates))
     (should (assoc "jj" org-capture-templates))
-    (should (assoc "tt" org-capture-templates))))
+    (should (assoc "tt" org-capture-templates))
+    ;; Group header placeholders must exist so org-capture can nest the
+    ;; multi-character keys under their prefix in the selection menu.
+    (should (equal (assoc "t" org-capture-templates) '("t" "tasks")))
+    (should (equal (assoc "j" org-capture-templates) '("j" "journal")))
+    (should (equal (assoc "n" org-capture-templates) '("n" "notes")))
+    (should (equal (assoc "a" org-capture-templates) '("a" "agent")))))
 
 (ert-deftest orgx-capture-add-project-file-templates-test ()
   "Test project file template registration macro and helper."
