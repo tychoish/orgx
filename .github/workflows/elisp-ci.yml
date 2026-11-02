@@ -20,6 +20,7 @@ jobs:
         emacs_version:
           - "29.4"
           - "30.2"
+          - "31.1"
 
     steps:
       - uses: actions/checkout@v4
@@ -28,8 +29,7 @@ jobs:
         uses: tychoish/elisp-ci/lint@main
         with:
           load-paths: "lisp"
-          target-files: "lisp/orgx.el lisp/orgx-capture.el lisp/orgx-capture-shell.el lisp/orgx-denote.el"
-          dependencies: "annotated-completing-read"
+          target-files: "lisp/*.el"
 
       - name: Run ERT Tests
         uses: tychoish/elisp-ci@main
@@ -42,7 +42,7 @@ jobs:
         uses: tychoish/elisp-ci/coverage@main
         with:
           load-paths: "lisp test"
-          source-files: "lisp/orgx.el lisp/orgx-capture.el lisp/orgx-capture-shell.el lisp/orgx-denote.el"
+          source-files: "lisp/*.el"
           test-files: "test/*-test.el"
           report-format: "lcov"
           output-file: "coverage/lcov.info"
