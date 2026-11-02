@@ -504,6 +504,7 @@ When optional TAG is supplied, search for that tag instead."
   '(org-contrib toc-org ox-gist ox-hugo ox-rst ox-leanpub ob-mermaid)
   "Supporting org packages used with orgx.")
 
+(autoload 'org-annotate-file "org-annotate-file" nil t)
 (autoload 'org-gist-export-to-gist "ox-gist" nil t)
 (autoload 'toc-org-insert-toc "toc-org" nil t)
 (autoload 'org-leanpub-book-export-markdown "ox-leanpub" nil t)

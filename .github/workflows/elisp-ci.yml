@@ -35,6 +35,7 @@ jobs:
         with:
           load-paths: "lisp test"
           test-files: "test/*-test.el"
+          dependencies: "ob-go ob-rust"
 
       - name: Measure Code Coverage
         uses: tychoish/elisp-ci/coverage@main
@@ -44,6 +45,7 @@ jobs:
           test-files: "test/*-test.el"
           report-format: "lcov"
           output-file: "coverage/lcov.info"
+          dependencies: "ob-go ob-rust"
 
       - name: Upload Coverage to Codecov
         uses: codecov/codecov-action@v5
