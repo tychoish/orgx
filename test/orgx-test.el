@@ -5,7 +5,16 @@
 (require 'ert)
 (require 'org)
 (require 'orgx)
-(require 'orgx-loaddefs)
+(require 'loaddefs-gen)
+
+;; orgx-loaddefs.el is a generated, gitignored convenience file (same
+;; purpose as magit-autoloads.el / org-loaddefs.el: using the package
+;; straight from a source checkout without package.el). Regenerate it
+;; fresh here rather than committing it, so it can never go stale.
+(let* ((orgx-dir (file-name-directory (locate-library "orgx")))
+       (loaddefs-file (expand-file-name "orgx-loaddefs.el" orgx-dir)))
+  (loaddefs-generate orgx-dir loaddefs-file)
+  (load loaddefs-file nil t))
 
 (ert-deftest orgx-date-now-test ()
   "Test formatting of current date timestamp."
