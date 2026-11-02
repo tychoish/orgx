@@ -188,5 +188,113 @@
     (bootstrap-set-notes-directory "/tmp/test-notes-2")
     (should (equal local-notes-directory (expand-file-name "/tmp/test-notes-2")))))
 
+(ert-deftest orgx-command-map-capture-submap-test ()
+  "c in orgx-command-map leads to the capture submap."
+  (should (eq orgx-capture-map (keymap-lookup orgx-command-map "c"))))
+
+(ert-deftest orgx-command-map-no-capitals-test ()
+  "No plain capital-letter keys are bound in orgx-command-map."
+  (should-not (keymap-lookup orgx-command-map "W")))
+
+(ert-deftest orgx-agenda-minor-mode-map-test ()
+  "orgx-agenda-minor-mode-map is a keymap binding /, C-l, and C-e to commands."
+  (should (keymapp orgx-agenda-minor-mode-map))
+  (should (commandp (keymap-lookup orgx-agenda-minor-mode-map "/")))
+  (should (commandp (keymap-lookup orgx-agenda-minor-mode-map "C-l")))
+  (should (commandp (keymap-lookup orgx-agenda-minor-mode-map "C-e"))))
+
+(ert-deftest orgx-agenda-view-candidate-test ()
+  "Dispatch key is left-justified to the given width before the colon."
+  (should (equal "da: Denote Agenda ALL"
+                 (orgx--agenda-view-candidate '("da" "Denote Agenda ALL") 2)))
+  (should (equal "a : Agenda (week/day)"
+                 (orgx--agenda-view-candidate '("a" "Agenda (week/day)") 2))))
+
+(ert-deftest orgx-enforce-question-answered-blocks-done-test ()
+  "A :question: heading refuses to close as DONE while orgx-mode is active."
+  ;; `org-set-regexps-and-options' reads `(default-value 'org-todo-keywords)'
+  ;; when the buffer has no #+TODO: lines, so the override must be a dynamic
+  ;; `let', not `setq-local' (which only shadows the default, it does not
+  ;; replace it).
+  (let ((org-todo-keywords '((sequence "TODO" "QUESTION" "|" "ANSWERED" "DONE"))))
+    (with-temp-buffer
+      (org-mode)
+      (org-set-regexps-and-options)
+      (orgx-mode 1)
+      (insert "* TODO Sample question :question:\n")
+      (goto-char (point-min))
+      (org-back-to-heading)
+      (should-error (org-todo "DONE") :type 'user-error)
+      (should (equal "TODO" (org-get-todo-state))))))
+
+(ert-deftest orgx-enforce-question-answered-allows-answered-test ()
+  "A :question: heading may close as ANSWERED while orgx-mode is active."
+  (let ((org-todo-keywords '((sequence "TODO" "QUESTION" "|" "ANSWERED" "DONE"))))
+    (with-temp-buffer
+      (org-mode)
+      (org-set-regexps-and-options)
+      (orgx-mode 1)
+      (insert "* TODO Sample question :question:\n")
+      (goto-char (point-min))
+      (org-back-to-heading)
+      (org-todo "ANSWERED")
+      (should (equal "ANSWERED" (org-get-todo-state))))))
+
+(ert-deftest orgx-enforce-question-answered-ignores-untagged-test ()
+  "A heading without :question: closes normally with DONE while orgx-mode is active."
+  (let ((org-todo-keywords '((sequence "TODO" "QUESTION" "|" "ANSWERED" "DONE"))))
+    (with-temp-buffer
+      (org-mode)
+      (org-set-regexps-and-options)
+      (orgx-mode 1)
+      (insert "* TODO Ordinary task\n")
+      (goto-char (point-min))
+      (org-back-to-heading)
+      (org-todo "DONE")
+      (should (equal "DONE" (org-get-todo-state))))))
+
+(ert-deftest orgx-link-github-line-support-rewrites-line-test ()
+  "GitHub-style #L123 fragments are rewritten to ::123."
+  (let ((captured nil))
+    (orgx-link-github-line-support (lambda (path _in-emacs) (setq captured path))
+                                   "path/to/foo.el#L42"
+                                   nil)
+    (should (equal "path/to/foo.el::42" captured))))
+
+(ert-deftest orgx-link-github-line-support-rewrites-range-test ()
+  "GitHub-style #L123-L145 fragments are rewritten to the first line ::123."
+  (let ((captured nil))
+    (orgx-link-github-line-support (lambda (path _in-emacs) (setq captured path))
+                                   "path/to/foo.el#L123-L145"
+                                   nil)
+    (should (equal "path/to/foo.el::123" captured))))
+
+(ert-deftest orgx-link-github-line-support-preserves-plain-path-test ()
+  "Paths without GitHub line fragments are passed through unchanged."
+  (let ((captured nil))
+    (orgx-link-github-line-support (lambda (path _in-emacs) (setq captured path))
+                                   "path/to/foo.el"
+                                   nil)
+    (should (equal "path/to/foo.el" captured))))
+
+(ert-deftest orgx-open-custom-id-slug-fallback-opens-matching-custom-id-test ()
+  "Slug fallback jumps to the heading with a matching CUSTOM_ID."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Target Heading\n:PROPERTIES:\n:CUSTOM_ID: target-id\n:END:\n")
+    (should (orgx-open-custom-id-slug-fallback "#target-id"))
+    (should (looking-at "\\* Target Heading"))))
+
+(ert-deftest orgx-open-custom-id-slug-fallback-ignores-non-id-paths-test ()
+  "Paths without a leading # are left untouched."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Target Heading\n:PROPERTIES:\n:CUSTOM_ID: target-id\n:END:\n")
+    (should-not (orgx-open-custom-id-slug-fallback "target-id"))))
+
+(ert-deftest orgx-auxiliary-packages-includes-ob-mermaid-test ()
+  "orgx--auxiliary-packages includes ob-mermaid."
+  (should (memq 'ob-mermaid orgx--auxiliary-packages)))
+
 (provide 'orgx-test)
 ;;; orgx-test.el ends here
