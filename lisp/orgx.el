@@ -57,6 +57,7 @@
 (declare-function orgx-denote-agenda-questions "orgx-denote")
 (declare-function orgx-denote-agenda-composite "orgx-denote")
 (declare-function orgx-denote-agenda-completed-plans "orgx-denote")
+(declare-function orgx-bulk-todo-state "orgx-bulk")
 
 (defvar orgx-agenda-minor-mode)
 (defvar org-state)
@@ -553,6 +554,7 @@ buffer position."
 
 (keymap-set orgx-command-map "4" #'org-agenda)
 (keymap-set orgx-command-map "a" #'orgx-agenda-view)
+(keymap-set orgx-command-map "b" #'orgx-bulk-todo-state)
 (keymap-set orgx-command-map "c" orgx-capture-map)
 (keymap-set orgx-command-map "d" #'orgx-date-now)
 (keymap-set orgx-command-map "f" #'orgx-agenda-files-open)
