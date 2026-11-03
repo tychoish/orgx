@@ -259,7 +259,7 @@ Returns a record (FILE MARKER-POS ENTRY-TEXT) for the undo ring."
                  (format "Template switched to: %s" sym))
              (format "Unknown template: %s (choose task, note, journal, plain)" args)))))
       ("denote"
-       (if (require 'denote nil t)
+       (if (fboundp 'denote-directory-files)
            (let* ((files (denote-directory-files))
                   (choice (completing-read "Select denote note: "
                                            (mapcar #'file-name-nondirectory files)
@@ -435,7 +435,7 @@ window.  If it is hidden or not active, display it in the bottom popup window."
 (defun orgx-capture-shell-set-denote-target ()
   "Prompt for a denote note and set it as capture target."
   (interactive)
-  (if (require 'denote nil t)
+  (if (fboundp 'denote-directory-files)
       (let* ((files (denote-directory-files))
              (choice (completing-read "Select denote note: "
                                       (mapcar #'file-name-nondirectory files)
