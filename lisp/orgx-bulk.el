@@ -97,9 +97,9 @@ string.  FROM is a list of states to include; by default every not-done state."
             (org-map-entries
              (lambda ()
                (when-let* ((state (org-get-todo-state))
-                           (_ (if from
-                                  (member state from)
-                                (not (member state org-done-keywords)))))
+                           ((if from
+                                (member state from)
+                              (not (member state org-done-keywords)))))
                  (orgx-bulk--item-at-point)))
              match files)))
 
