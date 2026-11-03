@@ -92,37 +92,34 @@ the `orgx-bulk-plan'.  Runs with FILE's buffer current, before it is saved."
 FILES is anything `org-map-entries' accepts (nil for the current buffer,
 `agenda', or a list of files).  MATCH is an optional `org-map-entries' match
 string.  FROM is a list of states to include; by default every not-done state."
-  (seq-filter
-   #'identity
-   (org-map-entries
-    (lambda ()
-      (when-let* ((state (org-get-todo-state))
-                  (_ (if from
-                         (member state from)
-                       (not (member state org-done-keywords)))))
-        (orgx-bulk--item-at-point)))
-    match files)))
+  ;; `org-map-entries' keeps nil results, so drop the non-matching headings.
+  (seq-keep #'identity
+            (org-map-entries
+             (lambda ()
+               (when-let* ((state (org-get-todo-state))
+                           (_ (if from
+                                  (member state from)
+                                (not (member state org-done-keywords)))))
+                 (orgx-bulk--item-at-point)))
+             match files)))
 
 (defun orgx-bulk-collect-agenda ()
   "Return items for marked entries in the current agenda, else all its todo lines."
-  (let* ((marked (bound-and-true-p org-agenda-bulk-marked-entries))
-         (markers (or (copy-sequence marked)
-                      (let (acc)
-                        (save-excursion
-                          (goto-char (point-min))
-                          (while (not (eobp))
-                            (when-let* ((m (get-text-property (point) 'org-hd-marker)))
-                              (push m acc))
-                            (forward-line 1)))
-                        (nreverse acc)))))
-    (seq-filter
-     #'identity
-     (seq-map (lambda (m)
+  (let ((markers (or (bound-and-true-p org-agenda-bulk-marked-entries)
+                     (let (acc)
+                       (save-excursion
+                         (goto-char (point-min))
+                         (while (not (eobp))
+                           (when-let* ((m (get-text-property (point) 'org-hd-marker)))
+                             (push m acc))
+                           (forward-line 1)))
+                       (nreverse acc)))))
+    (seq-keep (lambda (m)
                 (when (marker-buffer m)
                   (org-with-point-at m
                     (when (org-get-todo-state)
                       (orgx-bulk--item-at-point)))))
-              markers))))
+              markers)))
 
 ;;; Planning
 
@@ -130,7 +127,7 @@ string.  FROM is a list of states to include; by default every not-done state."
   "Create and register a plan moving ITEMS to TARGET state.
 Items that cannot take TARGET are deselected with a problem noted."
   (let ((plan (orgx-bulk-plan--create
-               :id (format "bulk-%d" (cl-incf orgx-bulk--counter))
+               :id (format "bulk-%d" (setq orgx-bulk--counter (1+ orgx-bulk--counter)))
                :target target :items items :description description)))
     (seq-do-indexed
      (lambda (item i)
@@ -172,13 +169,12 @@ Items that cannot take TARGET are deselected with a problem noted."
     (condition-case err
         (org-with-point-at (orgx-bulk-item-marker item)
           (org-todo target)
-          (cond
-           ((equal (org-get-todo-state) target)
-            (setf (orgx-bulk-item-result item) 'changed)
-            (run-hook-with-args 'orgx-bulk-item-functions item plan))
-           (t
+          (if (equal (org-get-todo-state) target)
+              (progn
+                (setf (orgx-bulk-item-result item) 'changed)
+                (run-hook-with-args 'orgx-bulk-item-functions item plan))
             (setf (orgx-bulk-item-result item) 'failed
-                  (orgx-bulk-item-problem item) "state unchanged (blocked?)"))))
+                  (orgx-bulk-item-problem item) "state unchanged (blocked?)")))
       (error
        (setf (orgx-bulk-item-result item) 'failed
              (orgx-bulk-item-problem item) (error-message-string err))))))
@@ -205,8 +201,9 @@ are saved when `orgx-bulk-save-buffers' is non-nil."
   plan)
 
 (defun orgx-bulk-discard (plan)
-  "Mark PLAN discarded and kill its review buffer."
-  (setf (orgx-bulk-plan-status plan) 'discarded)
+  "Discard PLAN if still pending and kill its review buffer."
+  (when (eq (orgx-bulk-plan-status plan) 'pending)
+    (setf (orgx-bulk-plan-status plan) 'discarded))
   (when-let* ((buf (get-buffer (orgx-bulk-review-buffer-name plan))))
     (kill-buffer buf))
   plan)
@@ -244,22 +241,18 @@ existing keyword line is rewritten; the current buffer must visit FILE."
     (save-excursion
       (save-restriction
         (widen)
-        (goto-char (point-min))
-        (when (re-search-forward "^#\\+execution_status:[ \t]*\\(.*?\\)[ \t]*$" nil t)
-          (let ((current (match-string 1))
-                (beg (match-beginning 1))
-                (end (match-end 1))
-                (new (if (seq-some #'identity
-                                   (org-map-entries
-                                    (lambda ()
-                                      (when-let* ((s (org-get-todo-state)))
-                                        (not (member s org-done-keywords))))))
-                         "in-progress"
-                       "complete")))
-            (unless (equal current new)
-              (goto-char beg)
-              (delete-region beg end)
-              (insert new))))))))
+        ;; Compute first: `org-map-entries' clobbers the match data.
+        (let ((new (if (seq-some #'identity
+                                 (org-map-entries
+                                  (lambda ()
+                                    (when-let* ((s (org-get-todo-state)))
+                                      (not (member s org-done-keywords))))))
+                       "in-progress"
+                     "complete")))
+          (goto-char (point-min))
+          (when (and (re-search-forward "^#\\+execution_status:[ \t]*\\(.*?\\)[ \t]*$" nil t)
+                     (not (equal (match-string 1) new)))
+            (replace-match new t t nil 1)))))))
 
 ;;; Review buffer
 
@@ -305,12 +298,11 @@ existing keyword line is rewritten; the current buffer must visit FILE."
      (lambda (item)
        (let ((start (point)))
          (insert (format "[%s] %-12s -> %-10s %s  (%s%s)%s\n"
-                         (cond ((orgx-bulk-item-result item)
-                                (pcase (orgx-bulk-item-result item)
-                                  ('changed "✓")
-                                  (_ "!")))
-                               ((orgx-bulk-item-selected item) "x")
-                               (t " "))
+                         (cond
+                          ((eq (orgx-bulk-item-result item) 'changed) "✓")
+                          ((orgx-bulk-item-result item) "!")
+                          ((orgx-bulk-item-selected item) "x")
+                          (t " "))
                          (orgx-bulk-item-from-state item)
                          (orgx-bulk-plan-target plan)
                          (orgx-bulk-item-heading item)
@@ -390,9 +382,9 @@ existing keyword line is rewritten; the current buffer must visit FILE."
 (defun orgx-bulk-review-quit ()
   "Discard a pending plan and close the review buffer."
   (interactive)
-  (when (eq (orgx-bulk-plan-status orgx-bulk--review-plan) 'pending)
-    (setf (orgx-bulk-plan-status orgx-bulk--review-plan) 'discarded))
-  (quit-window t))
+  (let ((plan orgx-bulk--review-plan))
+    (quit-window t)
+    (orgx-bulk-discard plan)))
 
 (defun orgx-bulk-review (plan &optional select)
   "Show PLAN in its review buffer and return the buffer.
@@ -404,9 +396,7 @@ With SELECT, also select the window; otherwise only display it."
       (orgx-bulk-review-render))
     (if select
         (pop-to-buffer buf)
-      (condition-case nil
-          (display-buffer buf)
-        (error nil)))
+      (display-buffer buf))
     buf))
 
 ;;; Interactive entry point
