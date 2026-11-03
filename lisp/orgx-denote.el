@@ -358,16 +358,24 @@ contains a `denote:ID' link to it."
         (match-string 1)
       (file-name-base file))))
 
-(defun orgx-denote--count-open-items (file keywords)
-  "Return the number of headings in FILE whose TODO keyword is in KEYWORDS."
+(defun orgx-denote--has-open-items-p (file keywords)
+  "Return non-nil if FILE has a heading whose TODO keyword is in KEYWORDS."
   (let ((case-fold-search nil)
-        (re (format "^\\*+ %s[ \t]" (regexp-opt keywords t)))
-        (count 0))
+        (re (format "^\\*+ %s[ \t]" (regexp-opt keywords t))))
     (with-temp-buffer
       (insert-file-contents file)
-      (while (re-search-forward re nil t)
-        (setq count (1+ count))))
-    count))
+      (and (re-search-forward re nil t) t))))
+
+(defun orgx-denote--open-note-files (files tags keywords)
+  "Return the denote notes in FILES that fit TAGS and KEYWORDS.
+A note needs every tag in TAGS and a heading in one of KEYWORDS."
+  (seq-filter (lambda (file)
+                (and (orgx-denote--file-id file)
+                     (seq-every-p (lambda (tag)
+                                    (member tag (denote-retrieve-filename-keywords-as-list file)))
+                                  tags)
+                     (orgx-denote--has-open-items-p file keywords)))
+              files))
 
 (defun orgx-denote--peer-linked-ids ()
   "Return denote IDs linked from headings that would peer new children at point.
@@ -387,6 +395,50 @@ they are the top-level headings of the buffer."
         (while (re-search-forward re end t)
           (push (match-string 1) ids))
         ids))))
+
+(defun orgx-denote--target-marker (target)
+  "Return a marker at the heading of refile TARGET, or at the start of its file."
+  (with-current-buffer (find-file-noselect (nth 1 target))
+    (save-excursion
+      (save-restriction
+        (widen)
+        (goto-char (or (nth 3 target) (point-min)))
+        (point-marker)))))
+
+(defun orgx-denote--unlinked-files (files linked)
+  "Return FILES to capture, given the denote IDs LINKED already under the target.
+Notes in LINKED are dropped, kept, or chosen per `orgx-denote-capture-dedupe'."
+  (let ((dups (seq-filter (lambda (file) (member (orgx-denote--file-id file) linked))
+                          files)))
+    (pcase (if dups orgx-denote-capture-dedupe 'include)
+      ('include files)
+      ('skip (seq-difference files dups))
+      (_ (pcase (completing-read
+                 (format "%d note(s) already linked here: " (length dups))
+                 '("skip" "include" "choose") nil t nil nil "skip")
+           ("include" files)
+           ("choose"
+            (let ((readd (completing-read-multiple
+                          "Add anyway: " (seq-map #'file-name-nondirectory dups))))
+              (seq-difference
+               files
+               (seq-remove (lambda (file) (member (file-name-nondirectory file) readd))
+                           dups))))
+           (_ (seq-difference files dups)))))))
+
+(defun orgx-denote--link-headings (files)
+  "Return org text with one top-level `denote:' link heading per file in FILES.
+Brackets are stripped from titles and `%' is escaped for `org-capture'."
+  (string-join
+   (seq-map (lambda (file)
+              (format "* [[denote:%s][%s]]"
+                      (orgx-denote--file-id file)
+                      (thread-last
+                        (orgx-denote--file-title file)
+                        (replace-regexp-in-string "[][]" "")
+                        (replace-regexp-in-string "%" "\\\\%"))))
+            files)
+   "\n"))
 
 ;;;###autoload
 (defun orgx-denote-capture-open-items (&optional files)
@@ -409,47 +461,17 @@ in an `org-capture' buffer under the target."
          (keywords (or (seq-remove #'string-empty-p
                                    (completing-read-multiple "TODO keywords (empty for all open): " known nil t))
                        known))
-         (entries (seq-keep
-                   (lambda (file)
-                     (when (and (orgx-denote--file-id file)
-                                (seq-every-p (lambda (tag)
-                                               (member tag (denote-retrieve-filename-keywords-as-list file)))
-                                             tags))
-                       (let ((count (orgx-denote--count-open-items file keywords)))
-                         (when (> count 0)
-                           (cons file count)))))
-                   candidates)))
-    (when (null entries)
+         (open-files (orgx-denote--open-note-files candidates tags keywords)))
+    (when (null open-files)
       (user-error "No notes with open items matching %s" (string-join keywords ", ")))
-    (let* ((target (org-refile-get-location "Capture open denote items under"))
-           (marker (with-current-buffer (find-file-noselect (nth 1 target))
-                     (save-excursion
-                       (save-restriction
-                         (widen)
-                         (goto-char (or (nth 3 target) (point-min)))
-                         (point-marker)))))
-           (linked (with-current-buffer (marker-buffer marker)
-                     (save-excursion
-                       (goto-char marker)
-                       (orgx-denote--peer-linked-ids))))
-           (dups (seq-filter (lambda (entry) (member (orgx-denote--file-id (car entry)) linked))
-                             entries))
-           (kept (pcase (if dups orgx-denote-capture-dedupe 'include)
-                   ('skip (seq-difference entries dups))
-                   ('include entries)
-                   (_ (pcase (completing-read
-                              (format "%d note(s) already linked here: " (length dups))
-                              '("skip" "include" "choose") nil t nil nil "skip")
-                        ("include" entries)
-                        ("choose"
-                         (let ((readd (completing-read-multiple
-                                       "Add anyway: "
-                                       (seq-map (lambda (entry) (file-name-nondirectory (car entry))) dups))))
-                           (seq-remove (lambda (entry)
-                                         (and (member entry dups)
-                                              (not (member (file-name-nondirectory (car entry)) readd))))
-                                       entries)))
-                        (_ (seq-difference entries dups)))))))
+    (let* ((marker (orgx-denote--target-marker
+                    (org-refile-get-location "Capture open denote items under")))
+           (kept (orgx-denote--unlinked-files
+                  open-files
+                  (with-current-buffer (marker-buffer marker)
+                    (save-excursion
+                      (goto-char marker)
+                      (orgx-denote--peer-linked-ids))))))
       (when (null kept)
         (user-error "Every matching note is already linked under the target"))
       (let ((org-capture-templates
@@ -457,17 +479,7 @@ in an `org-capture' buffer under the target."
                 (function ,(lambda ()
                              (set-buffer (marker-buffer marker))
                              (goto-char marker)))
-                ,(string-join
-                  (thread-last
-                    kept
-                    (seq-map (lambda (entry)
-                               (format "* [[denote:%s][%s]]"
-                                       (orgx-denote--file-id (car entry))
-                                       (thread-last
-                                         (orgx-denote--file-title (car entry))
-                                         (replace-regexp-in-string "[][]" "")
-                                         (replace-regexp-in-string "%" "\\\\%"))))))
-                  "\n")
+                ,(orgx-denote--link-headings kept)
                 :empty-lines 0))))
         (org-capture nil "o")))))
 

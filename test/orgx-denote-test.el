@@ -210,15 +210,16 @@ it is paired with)."
   (let* ((dir (make-temp-file "orgx-denote-cap" t))
          (note (orgx-denote-test--write
                 dir "20261101T100000--a-note__x.org"
-                "#+title: A [Note] 100%\n* TODO one\n* DONE two\n** NEXT three\n* TODO four\n")))
+                "#+title: A [Note] 100%\n* TODO one\n* DONE two\n** NEXT three\n")))
     (unwind-protect
         (progn
           (should (equal "20261101T100000" (orgx-denote--file-id note)))
           (should-not (orgx-denote--file-id "/tmp/plain.org"))
           (should (equal "A [Note] 100%" (orgx-denote--file-title note)))
-          (should (= 2 (orgx-denote--count-open-items note '("TODO"))))
-          (should (= 3 (orgx-denote--count-open-items note '("TODO" "NEXT"))))
-          (should (= 0 (orgx-denote--count-open-items note '("WAIT")))))
+          (should (orgx-denote--has-open-items-p note '("TODO")))
+          (should (orgx-denote--has-open-items-p note '("NEXT")))
+          (should-not (orgx-denote--has-open-items-p note '("WAIT")))
+          (should-not (orgx-denote--has-open-items-p note '("todo"))))
       (delete-directory dir t))))
 
 (ert-deftest orgx-denote-peer-linked-ids-test ()
@@ -271,6 +272,119 @@ it is paired with)."
                                  "* [[denote:20261101T110000][Linked]]")
                          captured)))
       (when (get-file-buffer target)
+        (kill-buffer (get-file-buffer target)))
+      (delete-directory dir t))))
+
+(ert-deftest orgx-denote-open-note-files-test ()
+  "Notes need an id, every requested tag, and a heading in the keywords."
+  (let* ((dir (make-temp-file "orgx-denote-cap" t))
+         (tagged (orgx-denote-test--write
+                  dir "20261101T100000--tagged__work_x.org" "* TODO a\n"))
+         (untagged (orgx-denote-test--write
+                    dir "20261101T110000--untagged.org" "* TODO b\n"))
+         (waiting (orgx-denote-test--write
+                   dir "20261101T120000--waiting__work.org" "* WAIT c\n"))
+         (no-id (orgx-denote-test--write dir "plain__work.org" "* TODO d\n"))
+         (all (list tagged untagged waiting no-id)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'denote-retrieve-filename-keywords-as-list)
+                   (lambda (file)
+                     (when (string-match "__\\([a-z_]+\\)\\.org\\'" file)
+                       (split-string (match-string 1 file) "_")))))
+          (should (equal (list tagged untagged) (orgx-denote--open-note-files all nil '("TODO"))))
+          (should (equal (list tagged) (orgx-denote--open-note-files all '("work") '("TODO"))))
+          (should (equal (list waiting) (orgx-denote--open-note-files all '("work") '("WAIT"))))
+          (should-not (orgx-denote--open-note-files all '("work" "other") '("TODO"))))
+      (delete-directory dir t))))
+
+(ert-deftest orgx-denote-target-marker-test ()
+  "A refile target with a position gives that heading; without, the file start."
+  (let* ((dir (make-temp-file "orgx-denote-cap" t))
+         (file (orgx-denote-test--write dir "t.org" "* One\n* Two\n")))
+    (unwind-protect
+        (progn
+          (should (= 7 (marker-position (orgx-denote--target-marker (list "Two" file nil 7)))))
+          (should (= 1 (marker-position (orgx-denote--target-marker (list "t.org" file nil nil))))))
+      (when (get-file-buffer file)
+        (kill-buffer (get-file-buffer file)))
+      (delete-directory dir t))))
+
+(ert-deftest orgx-denote-unlinked-files-test ()
+  "Linked notes are dropped, kept, or chosen according to the dedupe setting."
+  (let* ((a "/d/20261101T100000--a.org")
+         (b "/d/20261101T110000--b.org")
+         (files (list a b))
+         (linked '("20261101T110000")))
+    (let ((orgx-denote-capture-dedupe 'skip))
+      (should (equal (list a) (orgx-denote--unlinked-files files linked))))
+    (let ((orgx-denote-capture-dedupe 'include))
+      (should (equal files (orgx-denote--unlinked-files files linked))))
+    (let ((orgx-denote-capture-dedupe 'prompt))
+      (should (equal files (orgx-denote--unlinked-files files nil)))
+      (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "skip")))
+        (should (equal (list a) (orgx-denote--unlinked-files files linked))))
+      (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "include")))
+        (should (equal files (orgx-denote--unlinked-files files linked))))
+      (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "choose"))
+                ((symbol-function 'completing-read-multiple)
+                 (lambda (&rest _) (list "20261101T110000--b.org"))))
+        (should (equal files (orgx-denote--unlinked-files files linked))))
+      (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "choose"))
+                ((symbol-function 'completing-read-multiple) (lambda (&rest _) nil)))
+        (should (equal (list a) (orgx-denote--unlinked-files files linked)))))))
+
+(ert-deftest orgx-denote-link-headings-test ()
+  "Headings link by id, drop brackets from titles and escape percent signs."
+  (let* ((dir (make-temp-file "orgx-denote-cap" t))
+         (a (orgx-denote-test--write dir "20261101T100000--a.org" "#+title: A [x] 100%\n"))
+         (b (orgx-denote-test--write dir "20261101T110000--b.org" "#+title: B\n")))
+    (unwind-protect
+        (should (equal "* [[denote:20261101T100000][A x 100\\%]]\n* [[denote:20261101T110000][B]]"
+                       (orgx-denote--link-headings (list a b))))
+      (delete-directory dir t))))
+
+(ert-deftest orgx-denote-capture-open-items-prompts-test ()
+  "Tags, keywords and the empty and fully-linked cases flow through the prompts."
+  (let* ((dir (make-temp-file "orgx-denote-cap" t))
+         (work (orgx-denote-test--write dir "20261101T100000--work__work.org" "#+title: Work\n* TODO a\n"))
+         (home (orgx-denote-test--write dir "20261101T110000--home__home.org" "#+title: Home\n* WAIT b\n"))
+         (target (orgx-denote-test--write dir "target.org" "* Inbox\n"))
+         (answers nil)
+         (captured nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'denote-retrieve-filename-keywords-as-list)
+                   (lambda (file)
+                     (when (string-match "__\\([a-z_]+\\)\\.org\\'" file)
+                       (split-string (match-string 1 file) "_"))))
+                  ((symbol-function 'orgx-denote-active-files) (lambda () (list work home)))
+                  ((symbol-function 'completing-read-multiple)
+                   (lambda (&rest _) (pop answers)))
+                  ((symbol-function 'org-refile-get-location)
+                   (lambda (&rest _) (list "Inbox" target nil 1)))
+                  ((symbol-function 'org-capture)
+                   (lambda (&rest _)
+                     (setq captured (nth 4 (car org-capture-templates))))))
+          ;; Tag prompt only (no files given): "home" with keyword prompt empty.
+          (setq answers (list '("home") nil))
+          (should-error (orgx-denote-capture-open-items) :type 'user-error)
+          ;; Keyword prompt names WAIT, so the home note qualifies.
+          (setq answers (list '("home") '("WAIT")))
+          (orgx-denote-capture-open-items)
+          (should (equal "* [[denote:20261101T110000][Home]]" captured))
+          ;; Explicit files skip the tag prompt, so only the keyword answer is consumed.
+          (setq answers (list '("TODO")))
+          (orgx-denote-capture-open-items (list work home))
+          (should (equal "* [[denote:20261101T100000][Work]]" captured))
+          ;; Everything already linked under the target is a user-error.
+          (with-current-buffer (find-file-noselect target)
+            (goto-char (point-max))
+            (insert "** [[denote:20261101T100000][Work]]\n"))
+          (setq answers (list '("TODO")))
+          (let ((orgx-denote-capture-dedupe 'skip))
+            (should-error (orgx-denote-capture-open-items (list work)) :type 'user-error)))
+      (when (get-file-buffer target)
+        (with-current-buffer (get-file-buffer target)
+          (set-buffer-modified-p nil))
         (kill-buffer (get-file-buffer target)))
       (delete-directory dir t))))
 
