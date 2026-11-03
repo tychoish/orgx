@@ -197,5 +197,82 @@ it is paired with)."
       (should (equal '(org-agenda-files (orgx-denote-completed-plan-files))
                      (assq 'org-agenda-files (nth 3 dx-cmd)))))))
 
+;;; Open-items capture
+
+(defun orgx-denote-test--write (dir name content)
+  "Write CONTENT to NAME in DIR and return the full path."
+  (let ((path (expand-file-name name dir)))
+    (write-region content nil path nil 'silent)
+    path))
+
+(ert-deftest orgx-denote-capture-helpers-test ()
+  "File id, title and open-item counting read denote notes correctly."
+  (let* ((dir (make-temp-file "orgx-denote-cap" t))
+         (note (orgx-denote-test--write
+                dir "20261101T100000--a-note__x.org"
+                "#+title: A [Note] 100%\n* TODO one\n* DONE two\n** NEXT three\n* TODO four\n")))
+    (unwind-protect
+        (progn
+          (should (equal "20261101T100000" (orgx-denote--file-id note)))
+          (should-not (orgx-denote--file-id "/tmp/plain.org"))
+          (should (equal "A [Note] 100%" (orgx-denote--file-title note)))
+          (should (= 2 (orgx-denote--count-open-items note '("TODO"))))
+          (should (= 3 (orgx-denote--count-open-items note '("TODO" "NEXT"))))
+          (should (= 0 (orgx-denote--count-open-items note '("WAIT")))))
+      (delete-directory dir t))))
+
+(ert-deftest orgx-denote-peer-linked-ids-test ()
+  "Only direct children of the target heading count as linked peers."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Target\n"
+            "** [[denote:20261101T100000][One]]\n"
+            "*** [[denote:20261101T110000][Nested]]\n"
+            "** Plain\n"
+            "* Other\n"
+            "** [[denote:20261101T120000][Elsewhere]]\n")
+    (goto-char (point-min))
+    (should (equal '("20261101T100000") (orgx-denote--peer-linked-ids)))
+    (goto-char (point-min))
+    (insert "* [[denote:20261101T130000][Top]]\n")
+    (goto-char (point-min))
+    (insert "preamble\n")
+    (goto-char (point-min))
+    (should (equal '("20261101T130000") (orgx-denote--peer-linked-ids)))))
+
+(ert-deftest orgx-denote-capture-open-items-test ()
+  "Capture builds one link heading per note with open items, deduping peers."
+  (let* ((dir (make-temp-file "orgx-denote-cap" t))
+         (open (orgx-denote-test--write
+                dir "20261101T100000--open__x.org" "#+title: Open\n* TODO a\n"))
+         (linked (orgx-denote-test--write
+                  dir "20261101T110000--linked__x.org" "#+title: Linked\n* TODO b\n"))
+         (closed (orgx-denote-test--write
+                  dir "20261101T120000--closed__x.org" "#+title: Closed\n* DONE c\n"))
+         (target (orgx-denote-test--write
+                  dir "target.org" "* Inbox\n** [[denote:20261101T110000][Linked]]\n"))
+         (captured nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'denote-retrieve-filename-keywords-as-list)
+                   (lambda (_) nil))
+                  ((symbol-function 'completing-read-multiple)
+                   (lambda (&rest _) nil))
+                  ((symbol-function 'org-refile-get-location)
+                   (lambda (&rest _) (list "Inbox" target nil 1)))
+                  ((symbol-function 'org-capture)
+                   (lambda (&rest _)
+                     (setq captured (nth 4 (car org-capture-templates))))))
+          (let ((orgx-denote-capture-dedupe 'skip))
+            (orgx-denote-capture-open-items (list open linked closed)))
+          (should (equal "* [[denote:20261101T100000][Open]]" captured))
+          (let ((orgx-denote-capture-dedupe 'include))
+            (orgx-denote-capture-open-items (list open linked closed)))
+          (should (equal (concat "* [[denote:20261101T100000][Open]]\n"
+                                 "* [[denote:20261101T110000][Linked]]")
+                         captured)))
+      (when (get-file-buffer target)
+        (kill-buffer (get-file-buffer target)))
+      (delete-directory dir t))))
+
 (provide 'orgx-denote-test)
 ;;; orgx-denote-test.el ends here
