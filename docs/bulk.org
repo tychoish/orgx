@@ -1,0 +1,125 @@
+#+title: Orgx Bulk Operations Guide
+#+author: tychoish
+#+language: en
+
+=orgx-bulk= layers a resumable plan model, operation registry, note-logging policy, and =agent-shell-queue= (ASQ) integration on top of Org's built-in =org-agenda-bulk-action=.
+
+The unit of work is an *agenda buffer*. With =org-agenda-sticky= enabled, each sticky agenda buffer acts as an isolated batch with its own buffer-local marks and optional ASQ queue bucket.
+
+* Quickstart
+
+1. Mark entries in an agenda buffer with =m= (=org-agenda-bulk-mark=) or =*= (=org-agenda-bulk-mark-all=).
+2. Press =B= (=orgx-agenda-bulk-action=) to choose an operation from the registry and build a persisted plan.
+   - If the batch size exceeds ~orgx-bulk-review-threshold~ (default =5=), or if you invoke =C-u B=, the plan opens in a review buffer (=*orgx-bulk: <id>*=).
+   - Otherwise, the plan executes immediately through =org-agenda-bulk-action=.
+3. Resume an interrupted or draft plan at any time:
+   - Key: =C-c o B=
+   - Command: ~M-x orgx-bulk-resume~
+
+* Agenda Driver (=B=) and Prefix Arguments
+
+In =org-agenda-mode= (when =orgx-agenda-minor-mode= is active), =B= runs ~orgx-agenda-bulk-action~:
+
+| Invocation | Behavior |
+|------------+----------|
+| =B= | Build plan; review if step count > ~orgx-bulk-review-threshold~, else execute immediately |
+| =C-u B= | Always open the plan in the review buffer without executing |
+| =0 B= | Force ~orgx-bulk-log-notes~ to =ignore= for this run |
+| =1 B= | Force ~orgx-bulk-log-notes~ to =one= (prompt once for a shared note) |
+| =2 B= | Force ~orgx-bulk-log-notes~ to =each= (prompt per heading during execution) |
+
+* Plan Review Buffer (=orgx-bulk-plan-mode=)
+
+Review buffers (=*orgx-bulk: <id>*=) display plan metadata, the operation pipeline, and each step's status, file, and heading.
+
+| Key | Command | Description |
+|-----+---------+-------------|
+| =C-c C-c= or =x= | ~orgx-bulk-buffer-execute~ | Execute all pending steps in the plan |
+| =m= / =u= | ~orgx-bulk-buffer-toggle-skip~ | Toggle the step at point between =pending= and =skipped= |
+| =a= | ~orgx-bulk-buffer-add-op~ | Append another operation to the plan (archive/refile are automatically ordered last) |
+| =n= | ~orgx-bulk-buffer-edit-note~ | Set or edit the per-step log note (or plan-wide note on header lines) |
+| =L= | ~orgx-bulk-buffer-cycle-log-notes~ | Cycle the plan's ~log-notes~ mode (=ignore= -> =one= -> =each=) |
+| =RET= | ~orgx-bulk-buffer-visit-target~ | Visit the target Org heading in another window |
+| =g= | ~orgx-bulk-buffer-refresh~ | Re-resolve targets, refresh agenda marks, and redraw |
+| =k= | ~orgx-bulk-buffer-discard~ | Delete the plan and its =.eld= file after confirmation |
+| =q= | ~quit-window~ | Bury the review buffer (plan remains saved on disk) |
+
+If you press =C-g= during execution, completed steps remain recorded as =done= on disk, the remaining steps stay =pending=, and the plan status becomes =paused=. Run ~M-x orgx-bulk-resume~ (=C-c o B=) to reopen the plan and continue.
+
+* Log-Note Modes and Blocking Policy
+
+** Note Logging (~orgx-bulk-log-notes~)
+When changing TODO states to or from keywords configured with =@= (such as =DONE(d@)=), ~orgx-bulk-log-notes~ controls how notes are recorded:
+
+- ='ignore= (default) :: Suppress all log-note prompts during bulk execution.
+- ='one= :: Prompt once when the plan is created (or use the plan's =:note= field) and inject that note into every heading's logbook.
+- ='each= :: Prompt for a note on each heading as it is processed (or use the step's pre-populated =:note=). Pressing =C-g= at a prompt pauses the plan cleanly.
+
+** Blocking Policy (~orgx-bulk-inhibit-blocking~)
+By default (~orgx-bulk-inhibit-blocking~ is =nil=), bulk =todo-state= changes honor ~org-enforce-todo-dependencies~, ~org-enforce-todo-checkbox-dependencies~, and ~org-blocker-hook~ (including Orgx's =:question:= blocker). Blocked headings are recorded as =failed= with the blocker reason while the rest of the batch continues. Set ~orgx-bulk-inhibit-blocking~ to =t= to bypass blocking rules during bulk operations.
+
+** Target Identification (~orgx-bulk-assign-ids~)
+By default (~orgx-bulk-assign-ids~ is =nil=), headings without an =ID= or =CUSTOM_ID= are resolved by file, outline path, heading title, and position hint (checking nearest line number when duplicate sibling titles exist). Set ~orgx-bulk-assign-ids~ to =t= to assign an ~org-id~ to every targeted heading when a plan is created.
+
+* Built-in Operations & Custom Operation Registry
+
+Built-in operations registered in =orgx-bulk-ops.el=:
+
+| Name | Key | Queueable | Description |
+|------+-----+-----------+-------------|
+| =todo-state= | =t= | Yes | Change TODO state |
+| =tag-add= | =+= | Yes | Add one or more tags |
+| =tag-remove= | =-= | Yes | Remove one or more tags |
+| =schedule= | =s= | Yes | Set or clear (=none=) SCHEDULED timestamp |
+| =deadline= | =d= | Yes | Set or clear (=none=) DEADLINE timestamp |
+| =priority= | =p= | Yes | Set priority (=A=, =B=, =C=) or clear (=none=) |
+| =property-set= | =P= | Yes | Set a drawer property =NAME= to =VALUE= |
+| =refile= | =r= | Yes | Refile subtree to target file and heading (ordered last) |
+| =archive= | =$= | Yes | Archive subtree via ~org-archive-subtree~ (ordered last) |
+| =archive-sibling= | =A= | Yes | Archive subtree to archive sibling (ordered last) |
+| =function= | =f= | No | Call an Emacs Lisp function at each heading |
+
+** Registering a Custom Operation
+Use ~orgx-bulk-register-op~ to add your own operation to the =B= prompt, plan serializer, ASQ queue, and MCP server:
+
+#+begin_src elisp
+(orgx-bulk-register-op 'effort-set
+  :key ?e
+  :label "effort"
+  :queueable t
+  :read-args (lambda ()
+               (list (read-string "Effort (e.g. 0:30): ")))
+  :validate (lambda (effort)
+              (when (string-empty-p effort)
+                "effort cannot be empty"))
+  :apply (lambda (effort)
+           (org-set-effort nil effort))
+  :describe (lambda (effort)
+              (format "effort = %s" effort))
+  :from-json (lambda (args)
+               (list (alist-get 'effort args)))
+  :schema '((:name "effort" :type "string" :description "Effort duration string")))
+#+end_src
+
+Existing entries in ~org-agenda-bulk-custom-functions~ are also bridged automatically as =function= operations.
+
+* Queuing on Sticky Agenda Buffers (=agent-shell-queue=)
+
+=orgx-bulk-asq.el= registers the =orgx-bulk= item type in =agent-shell-queue=, allowing any live =org-agenda-mode= buffer to act as an ASQ target buffer:
+
+- Command: ~M-x orgx-bulk-asq-enqueue~
+- Enqueues the entire marked batch in the target agenda buffer as a single queue item.
+- Freezes the plan's step list at enqueue time and locks marks in that agenda buffer (~orgx-bulk-batch-locked~) until all queued =orgx-bulk= items on that buffer complete.
+- Enforces ~orgx-bulk-asq-max-items~ (default =5=) per agenda buffer and rejects non-=:queueable= operations (such as =function=) or =each= note mode.
+- Honors item =delay-after= / ~agent-shell-queue-default-pause-delay~ between consecutive queued batches.
+
+* MCP Tools (=orgx-mcp.el=)
+
+The =orgx= MCP server exposes six bulk-operation tools:
+
+- =bulk_ops= :: List all registered bulk operations with their keys, queueable flags, and parameter schemas.
+- =bulk_plan_create= :: Build an agenda batch from a =scope= (=agenda_buffer=, =files=, =denote_tag=, or =query=), mark matching entries, and persist a plan (=status: "draft"=) with a preview of steps.
+- =bulk_plan_list= :: List saved plans (optionally filtered by =status=).
+- =bulk_plan_status= :: Return full step-by-step status and summary counts for a =plan_id=.
+- =bulk_plan_discard= :: Delete a plan and its =.eld= file.
+- =bulk_plan_execute= :: Execute (or resume) a saved plan through =org-agenda-bulk-action=; pass =enqueue: true= to queue it on the plan's sticky agenda buffer via ASQ instead of running synchronously.

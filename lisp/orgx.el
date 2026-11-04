@@ -58,6 +58,8 @@
 (declare-function orgx-denote-agenda-composite "orgx-denote")
 (declare-function orgx-denote-agenda-completed-plans "orgx-denote")
 (declare-function orgx-bulk-todo-state "orgx-bulk")
+(declare-function orgx-agenda-bulk-action "orgx-bulk-agenda")
+(declare-function orgx-bulk-resume "orgx-bulk-buffer")
 
 (defvar orgx-agenda-minor-mode)
 (defvar org-state)
@@ -555,6 +557,7 @@ buffer position."
 (keymap-set orgx-command-map "4" #'org-agenda)
 (keymap-set orgx-command-map "a" #'orgx-agenda-view)
 (keymap-set orgx-command-map "b" #'orgx-bulk-todo-state)
+(keymap-set orgx-command-map "B" #'orgx-bulk-resume)
 (keymap-set orgx-command-map "c" orgx-capture-map)
 (keymap-set orgx-command-map "d" #'orgx-date-now)
 (keymap-set orgx-command-map "f" #'orgx-agenda-files-open)
@@ -697,6 +700,7 @@ Activates `orgx-command-map' under C-c o."
 (keymap-set orgx-agenda-minor-mode-map "C-b" #'orgx-agenda-switch-buffer)
 (keymap-set orgx-agenda-minor-mode-map "M-a" #'orgx-agenda-view)
 (keymap-set orgx-agenda-minor-mode-map "r" #'org-agenda-refile)
+(keymap-set orgx-agenda-minor-mode-map "B" #'orgx-agenda-bulk-action)
 
 ;;;###autoload
 (define-minor-mode orgx-agenda-minor-mode
