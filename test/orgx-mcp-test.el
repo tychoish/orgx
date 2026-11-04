@@ -3,9 +3,15 @@
 ;;; Code:
 
 (require 'ert)
+(require 'cl-lib)
+(require 'map)
+(require 'seq)
 (require 'org)
 (require 'mcpkit)
 (require 'orgx-bulk)
+(require 'orgx-bulk-ops)
+(require 'orgx-bulk-agenda)
+(require 'orgx-bulk-buffer)
 (require 'orgx-mcp)
 
 (defun orgx-mcp-test--call (tool args)
@@ -22,16 +28,30 @@ Signal an error carrying the handler's error message on failure."
 (defmacro orgx-mcp-test--with-file (var content &rest body)
   "Bind VAR to a temp org file holding CONTENT and run BODY."
   (declare (indent 2))
-  `(let ((,var (make-temp-file "orgx-mcp" nil ".org" ,content))
-         (org-todo-keywords '((sequence "TODO" "|" "DONE" "CANCELED")))
-         (orgx-bulk--plans (make-hash-table :test #'equal)))
+  `(let* ((orgx-bulk-directory (make-temp-file "orgx-mcp-bulk-dir-" t))
+          (,var (make-temp-file "orgx-mcp-" nil ".org" ,content))
+          (org-todo-keywords '((sequence "TODO" "|" "DONE" "CANCELED")))
+          (orgx-bulk--plans (make-hash-table :test #'equal))
+          (orgx-bulk--counter 0)
+          (orgx-bulk-log-notes 'ignore))
      (unwind-protect
          (cl-letf (((symbol-function 'display-buffer) #'ignore))
+           (with-current-buffer (find-file-noselect ,var)
+             (org-mode)
+             (org-set-regexps-and-options))
            ,@body)
-       (when-let* ((b (find-buffer-visiting ,var)))
-         (with-current-buffer b (set-buffer-modified-p nil))
-         (kill-buffer b))
-       (delete-file ,var))))
+       (dolist (buf (buffer-list))
+         (when (or (and (buffer-file-name buf)
+                        (equal (expand-file-name (buffer-file-name buf))
+                               (expand-file-name ,var)))
+                   (string-prefix-p "*Org Agenda" (buffer-name buf))
+                   (string-prefix-p "*orgx-bulk:" (buffer-name buf)))
+           (with-current-buffer buf (set-buffer-modified-p nil))
+           (kill-buffer buf)))
+       (when (file-exists-p ,var)
+         (delete-file ,var))
+       (when (file-directory-p orgx-bulk-directory)
+         (delete-directory orgx-bulk-directory t)))))
 
 (ert-deftest orgx-mcp-capture-target-test ()
   (let ((org-capture-templates '(("t" "Task" entry (file "/default") "")
@@ -75,8 +95,8 @@ Signal an error carrying the handler's error message on failure."
 (ert-deftest orgx-mcp-tools-registered-test ()
   (should (seq-every-p (lambda (name) (map-elt (mcpkit-service-tools orgx-mcp-service) name))
                        '("org_capture_task" "org_capture_journal" "org_capture_clock_in"
-                         "bulk_state_preview" "bulk_state_status"
-                         "bulk_state_apply" "bulk_state_discard"))))
+                         "bulk_ops" "bulk_plan_create" "bulk_plan_list"
+                         "bulk_plan_status" "bulk_plan_discard" "bulk_plan_execute"))))
 
 (ert-deftest orgx-mcp-capture-tools-test ()
   (let ((calls nil))
@@ -99,84 +119,84 @@ Signal an error carrying the handler's error message on failure."
         (should (equal (plist-get r :target) "clock-in"))
         (should (equal (car calls) '(("att" "at") "TODO go" nil t)))))))
 
-(ert-deftest orgx-mcp-bulk-preview-test ()
+(ert-deftest orgx-mcp-bulk-ops-test ()
+  (let* ((res (orgx-mcp-test--call "bulk_ops" nil))
+         (ops (append (plist-get res :ops) nil))
+         (names (mapcar (lambda (o) (plist-get o :name)) ops)))
+    (should (member "todo-state" names))
+    (should (member "schedule" names))
+    (should (member "archive-sibling" names))
+    (should (member "property-set" names))))
+
+(ert-deftest orgx-mcp-bulk-plan-create-and-list-test ()
   (orgx-mcp-test--with-file f "* TODO a\n* TODO b\n* DONE c\n"
     (let ((reviewed nil)
           (org-agenda-files (list f)))
       (cl-letf (((symbol-function 'orgx-bulk-review) (lambda (plan &rest _) (push plan reviewed))))
-        ;; Explicit files scope, default :show.
-        (let ((s (orgx-mcp-test--call "bulk_state_preview"
-                                      (list :target_state "CANCELED" :files (vector f)))))
-          (should (equal (plist-get s :target_state) "CANCELED"))
-          (should (= (length (plist-get s :items)) 2))
+        ;; Reject `each' log_notes over MCP.
+        (should-error
+         (orgx-mcp-test--call
+          "bulk_plan_create"
+          (list :files (vector f)
+                :ops (vector '(:op "todo-state" :args (:state "DONE")))
+                :log_notes "each")))
+        ;; Create plan with explicit files scope.
+        (let ((s (orgx-mcp-test--call
+                  "bulk_plan_create"
+                  (list :files (vector f)
+                        :ops (vector '(:op "todo-state" :args (:state "CANCELED")))
+                        :log_notes "one"
+                        :message "Canceled over MCP"))))
+          (should (equal (plist-get s :status) "draft"))
+          (should (equal (plist-get s :log_notes) "one"))
+          (should (equal (plist-get s :note) "Canceled over MCP"))
+          (should (= (length (plist-get s :steps)) 2))
           (should (= (length reviewed) 1))
-          (should (orgx-bulk-get-plan (plist-get s :plan_id))))
-        ;; Default scope without files is the agenda files; :show false skips review.
-        (let ((s (orgx-mcp-test--call "bulk_state_preview"
-                                      '(:target_state "CANCELED" :show :json-false))))
-          (should (= (length (plist-get s :items)) 2))
-          (should (= (length reviewed) 1)))
-        ;; from_states and match.
-        (let ((s (orgx-mcp-test--call "bulk_state_preview"
-                                      (list :target_state "TODO" :files (vector f)
-                                            :from_states ["DONE"] :show :json-false))))
-          (should (equal (seq-map (lambda (i) (plist-get i :heading)) (plist-get s :items))
-                         '("c"))))
-        ;; denote scope.
-        (cl-letf (((symbol-function 'orgx-denote-files) (lambda () (list f))))
-          (let ((s (orgx-mcp-test--call "bulk_state_preview"
-                                        '(:target_state "DONE" :scope "denote" :show :json-false))))
-            (should (= (length (plist-get s :items)) 2))))))))
+          (let ((listed (orgx-mcp-test--call "bulk_plan_list" '(:status "draft"))))
+            (should (= (length (plist-get listed :plans)) 1))))))))
 
-(ert-deftest orgx-mcp-bulk-status-and-unknown-test ()
-  (orgx-mcp-test--with-file f "* TODO a\n"
-    (let* ((plan (orgx-bulk-plan "DONE" (orgx-bulk-collect-files :files (list f))))
-           (s (orgx-mcp-test--call "bulk_state_status" (list :plan_id (orgx-bulk-plan-id plan)))))
-      (should (equal (plist-get s :status) "pending"))
-      (should (equal (plist-get s :plan_id) (orgx-bulk-plan-id plan))))
-    (should-error (orgx-mcp-test--call "bulk_state_status" '(:plan_id "bulk-nope"))
-                  :type 'error)
-    (should (string-match-p "Unknown plan: bulk-nope"
-                            (condition-case err
-                                (orgx-mcp-test--call "bulk_state_apply" '(:plan_id "bulk-nope"))
-                              (error (cadr err)))))
-    (should-error (orgx-mcp-test--call "bulk_state_discard" '(:plan_id "bulk-nope")))))
-
-(ert-deftest orgx-mcp-bulk-apply-needs-confirmation-test ()
-  (orgx-mcp-test--with-file f "* TODO a\n"
-    (let* ((plan (orgx-bulk-plan "DONE" (orgx-bulk-collect-files :files (list f))))
-           (orgx-mcp-agent-may-apply nil)
-           (r (orgx-mcp-test--call "bulk_state_apply" (list :plan_id (orgx-bulk-plan-id plan)))))
-      (should (equal (plist-get r :status) "awaiting_user_confirmation"))
-      (should (equal (plist-get r :review_buffer) (orgx-bulk-review-buffer-name plan)))
-      (should (eq (orgx-bulk-plan-status plan) 'pending))
-      (should (equal (with-current-buffer (find-file-noselect f)
-                       (org-map-entries #'org-get-todo-state))
-                     '("TODO"))))))
-
-(ert-deftest orgx-mcp-bulk-apply-allowed-test ()
+(ert-deftest orgx-mcp-bulk-status-discard-and-execute-test ()
   (orgx-mcp-test--with-file f "* TODO a\n* TODO b\n* TODO c\n"
-    (let* ((plan (orgx-bulk-plan "DONE" (orgx-bulk-collect-files :files (list f))))
-           (orgx-mcp-agent-may-apply t)
-           (r (orgx-mcp-test--call "bulk_state_apply"
-                                   (list :plan_id (orgx-bulk-plan-id plan) :exclude [2]))))
-      (should (equal (plist-get r :status) "applied"))
-      (should (equal (with-current-buffer (find-file-noselect f)
-                       (org-map-entries #'org-get-todo-state))
-                     '("DONE" "TODO" "DONE")))
-      ;; Applying again just reports the non-pending plan.
-      (should (equal (plist-get (orgx-mcp-test--call "bulk_state_apply"
-                                                     (list :plan_id (orgx-bulk-plan-id plan)))
-                                :status)
-                     "applied")))))
+    (let* ((created (orgx-mcp-test--call
+                     "bulk_plan_create"
+                     (list :files (vector f)
+                           :ops (vector '(:op "todo-state" :args (:state "DONE")))
+                           :show :json-false)))
+           (plan-id (plist-get created :plan_id))
+           (status-res (orgx-mcp-test--call "bulk_plan_status" (list :plan_id plan-id))))
+      (should (equal (plist-get status-res :status) "draft"))
+      ;; Gate execute behind `orgx-mcp-agent-may-apply'.
+      (let ((orgx-mcp-agent-may-apply nil))
+        (let ((r (orgx-mcp-test--call "bulk_plan_execute" (list :plan_id plan-id))))
+          (should (equal (plist-get r :status) "awaiting_user_confirmation"))
+          (should (equal (plist-get r :plan_id) plan-id))))
+      ;; Allow agent apply and exclude step 2.
+      (let ((orgx-mcp-agent-may-apply t))
+        (let ((r (orgx-mcp-test--call "bulk_plan_execute"
+                                      (list :plan_id plan-id :exclude [2]))))
+          (should (equal (plist-get r :status) "complete"))
+          (with-current-buffer (find-file-noselect f)
+            (should (equal (org-map-entries #'org-get-todo-state)
+                           '("DONE" "TODO" "DONE"))))))
+      ;; Discard a second plan.
+      (let* ((created2 (orgx-mcp-test--call
+                        "bulk_plan_create"
+                        (list :files (vector f)
+                              :ops (vector '(:op "todo-state" :args (:state "CANCELED"))))))
+             (pid2 (plist-get created2 :plan_id))
+             (disc (orgx-mcp-test--call "bulk_plan_discard" (list :plan_id pid2))))
+        (should (equal (plist-get disc :status) "discarded"))))))
 
-(ert-deftest orgx-mcp-bulk-discard-test ()
+(ert-deftest orgx-mcp-bulk-plan-create-one-requires-message-test ()
+  ;; `one' without a note would make execution prompt inside the handler.
   (orgx-mcp-test--with-file f "* TODO a\n"
-    (let* ((plan (orgx-bulk-plan "DONE" (orgx-bulk-collect-files :files (list f))))
-           (buf (orgx-bulk-review plan))
-           (r (orgx-mcp-test--call "bulk_state_discard" (list :plan_id (orgx-bulk-plan-id plan)))))
-      (should (equal (plist-get r :status) "discarded"))
-      (should-not (buffer-live-p buf)))))
+    (should-error
+     (orgx-mcp-test--call
+      "bulk_plan_create"
+      (list :files (vector f)
+            :ops (vector '(:op "todo-state" :args (:state "DONE")))
+            :log_notes "one"
+            :show :json-false)))))
 
 (provide 'orgx-mcp-test)
 ;;; orgx-mcp-test.el ends here
