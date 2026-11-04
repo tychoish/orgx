@@ -728,7 +728,11 @@ Only the display changes.  Widths are `orgx-table-shrink-width'."
   (when (and (derived-mode-p 'org-mode)
              (fboundp 'org-table--shrink-columns))
     (let ((inhibit-message t))
-      (org-table-map-tables #'orgx--shrink-table-at-point t 'org))
+      ;; Older Org takes only (F &optional QUIET).
+      (if (let ((max (cdr (func-arity #'org-table-map-tables))))
+            (or (eq max 'many) (>= max 3)))
+          (org-table-map-tables #'orgx--shrink-table-at-point t 'org)
+        (org-table-map-tables #'orgx--shrink-table-at-point t)))
     (setq orgx--tables-shrunk t)))
 
 (defun orgx--enable-table-shrink ()

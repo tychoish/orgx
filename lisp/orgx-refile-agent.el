@@ -127,7 +127,7 @@ apply `orgx-refile-agent-original-action' to the original heading."
 (defun orgx-refile-agent--ad-get-location (location)
   "Filter-return advice for `org-refile-get-location'.
 When LOCATION is an agent target, send the subtree and abort the refile."
-  (if-let* ((_ orgx-refile-agent--active)
+  (if-let* (orgx-refile-agent--active
             ((equal (nth 1 location) orgx-refile-agent--file))
             (entry (orgx-refile-agent--lookup (car location))))
       (progn (if (markerp orgx-refile-agent--marker)
