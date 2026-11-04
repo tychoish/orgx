@@ -269,7 +269,7 @@ Opens or recreates PLAN's agenda buffer and re-marks the steps whose targets
 still resolve via `orgx-bulk--resolve-target'.  Steps whose targets no longer
 resolve are marked `missing'.  Returns the agenda buffer."
   (let ((resolved-markers nil)
-        (saved-global-marks org-agenda-bulk-marked-entries)
+        (rebuilt-marks nil)
         (orgx-bulk--internal-marking t))
     (dolist (step (orgx-bulk-plan-steps plan))
       (when (eq (orgx-bulk-step-status step) 'pending)
@@ -278,20 +278,23 @@ resolve are marked `missing'.  Returns the agenda buffer."
           (setf (orgx-bulk-step-status step) 'missing
                 (orgx-bulk-step-message step) "Target heading not found"))))
     (setq resolved-markers (nreverse resolved-markers))
-    (unwind-protect
-        (pcase-let ((`(,buf . ,batch-markers)
-                     (orgx-bulk-batch-ensure-agenda plan resolved-markers)))
-          (with-current-buffer buf
-            (let ((org-agenda-bulk-marked-entries nil))
-              (org-agenda-bulk-unmark-all)
-              (dolist (bm batch-markers)
-                (when-let* ((pos (text-property-any (point-min) (point-max) 'org-hd-marker bm)))
-                  (goto-char pos)
-                  (org-agenda-bulk-mark)))
-              (setq-local orgx-bulk-batch-markers batch-markers)))
-          (orgx-bulk-save plan)
-          buf)
-      (setq org-agenda-bulk-marked-entries saved-global-marks))))
+    (pcase-let ((`(,buf . ,batch-markers)
+                 (orgx-bulk-batch-ensure-agenda plan resolved-markers)))
+      (with-current-buffer buf
+        ;; Mark with an isolated list, then add the result to the global marks
+        ;; so the resumed batch stays marked without disturbing other agendas.
+        (let ((org-agenda-bulk-marked-entries nil))
+          (org-agenda-bulk-unmark-all)
+          (dolist (bm batch-markers)
+            (when-let* ((pos (text-property-any (point-min) (point-max) 'org-hd-marker bm)))
+              (goto-char pos)
+              (org-agenda-bulk-mark)))
+          (setq rebuilt-marks org-agenda-bulk-marked-entries))
+        (setq-local orgx-bulk-batch-markers batch-markers))
+      (setq org-agenda-bulk-marked-entries
+            (append rebuilt-marks org-agenda-bulk-marked-entries))
+      (orgx-bulk-save plan)
+      buf)))
 
 ;;; Interactive Scope Reader (used by `orgx-bulk-todo-state')
 

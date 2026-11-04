@@ -90,6 +90,12 @@
       (let ((rebuilt-buf (orgx-bulk-batch-rebuild plan)))
         (should (buffer-live-p rebuilt-buf))
         (should (= (length (buffer-local-value 'orgx-bulk-batch-markers rebuilt-buf)) 1))
+        ;; Survivors stay marked, with matching overlays, after rebuild.
+        (let ((marked (buffer-local-value 'orgx-bulk-batch-markers rebuilt-buf)))
+          (should (seq-set-equal-p org-agenda-bulk-marked-entries marked))
+          (with-current-buffer rebuilt-buf
+            (should (seq-some (lambda (o) (eq (overlay-get o 'type) 'org-marked-entry-overlay))
+                              (overlays-in (point-min) (point-max))))))
         (should (equal (mapcar #'orgx-bulk-step-status (orgx-bulk-plan-steps plan))
                        '(pending missing)))))))
 
