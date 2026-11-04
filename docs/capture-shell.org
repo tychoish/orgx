@@ -41,3 +41,30 @@ Within the REPL buffer, slash commands allow dynamic reconfiguration:
 - =/recent= or =/list= :: List recently captured items in the session.
 - =/clear= :: Clear the REPL scrollback.
 - =/help= :: Display inline command reference.
+
+** 4. Capture Form
+Plain input is captured immediately. To fill in more than a title, open the form:
+- End the line with the trigger (=orgx-capture-shell-form-trigger=, default =;=), e.g. =buy milk;=
+- Or press =C-RET= on the current input (even if empty); terminal frames often can't send =C-RET=, so use the trigger or =/form= there
+- To capture text that really ends in the trigger, double it: =int x = 1;;= captures =int x = 1;=
+- Or use =/form [title]= / ~M-x orgx-capture-shell-form~
+
+The form asks for title, template, target file, headline (completing over the file's outline paths) and an optional body, then captures once without changing the shell's current target. Set =orgx-capture-shell-form-style= to =transient= to edit the fields in a transient menu instead (=c= captures).
+
+** 5. Nested Targets
+Headlines may be outline paths separated by =orgx-capture-shell-headline-separator= (default =/=), e.g. =/target notes.org:Projects/Tasks=. Each segment is searched inside the previous one; missing segments are created with correct nesting. Captured headings are re-leveled to be children of the target, so captures never land as stray top-level headings.
+
+** 6. Completion at Point
+Slash commands, =/template= names, and =/target= files and headlines (after the =:=) complete with =completion-at-point= and Corfu.
+
+** 7. Prompt
+The prompt shows target and template: =orgx-capture [agentic.org:Tasks|task]>=.
+
+** 8. HUD
+=hud-dispatch= lists the shell toggle (=o s=) and the capture form (=o f=) under org-mode.
+
+** Known limits
+- Headline names containing the separator (=/=) can't be addressed as a single path segment; set =orgx-capture-shell-headline-separator= to another string.
+- A headline containing => = confuses prompt detection for completion; avoid it in target headlines.
+- =/undo= removes the captured entry but leaves any parent headings that capture created.
+- The form's body is a single line.

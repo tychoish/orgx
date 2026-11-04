@@ -13,7 +13,9 @@
 ;; - Comint-based REPL with customizable prompt and completion
 ;; - Cascading target resolution via `orgx-capture-shell-target-directory-alist'
 ;; - Dedicated bottom popup window (15 lines) with toggle command
-;; - Slash commands (/target, /template, /denote, /undo, /recent, /help)
+;; - Slash commands (/target, /template, /form, /denote, /undo, /recent, /help)
+;; - Capture form: end a line with `orgx-capture-shell-form-trigger' or press
+;;   C-RET to be prompted for title, template, target and body
 ;; - Undo stack for rolling back captured entries
 
 ;;; Code:
@@ -67,6 +69,32 @@ that file and headline are used as the default target."
   "When non-nil, automatically register display-buffer rule for bottom popup."
   :type 'boolean
   :group 'orgx-capture-shell)
+
+(defcustom orgx-capture-shell-form-trigger ";"
+  "String that, when ending a line of input, opens the capture form.
+The trigger is stripped and the rest of the line becomes the initial title.
+Set to nil to disable; \\`C-RET' always opens the form."
+  :type '(choice (const :tag "Disabled" nil) string)
+  :group 'orgx-capture-shell)
+
+(defcustom orgx-capture-shell-form-style 'prompt
+  "How the capture form collects values.
+`prompt' asks for each field in the minibuffer; `transient' opens a
+transient menu with editable fields."
+  :type '(choice (const prompt) (const transient))
+  :group 'orgx-capture-shell)
+
+(defcustom orgx-capture-shell-headline-separator "/"
+  "Separator for nested outline paths in a target headline (e.g. \"Projects/Tasks\")."
+  :type 'string
+  :group 'orgx-capture-shell)
+
+(defconst orgx-capture-shell-templates '(task note journal plain)
+  "Recognized capture templates.")
+
+(defconst orgx-capture-shell--prompt-regexp
+  (rx bol "orgx-capture " (*? nonl) "> ")
+  "Regexp matching the shell prompt.")
 
 ;;; State variables (buffer-local)
 
@@ -126,10 +154,13 @@ that file and headline are used as the default target."
 
 ;;; Core capture engine
 
+(defconst orgx-capture-shell--heading-line-regexp "\\`\\(\\*+\\) "
+  "Regexp matching an Org heading line, capturing the stars.")
+
 (defun orgx-capture-shell--format-entry (text template)
   "Format capture TEXT according to TEMPLATE (\\='task, \\='note, \\='journal, \\='plain)."
   (let ((trimmed (string-trim text)))
-    (if (string-prefix-p "*" trimmed)
+    (if (string-match-p orgx-capture-shell--heading-line-regexp trimmed)
         trimmed
       (pcase template
         ('task
@@ -138,14 +169,70 @@ that file and headline are used as the default target."
          (format "* %s <%s>"
                  trimmed
                  (format-time-string "%Y-%m-%d %H:%M")))
-        ('note
-         (format "* %s" trimmed))
         (_
          (format "* %s" trimmed))))))
 
+(defun orgx-capture-shell--relevel (text level)
+  "Shift the headings in TEXT so the shallowest one is at LEVEL."
+  (let* ((lines (split-string text "\n"))
+         (shallowest (cl-loop for l in lines
+                              when (string-match orgx-capture-shell--heading-line-regexp l)
+                              minimize (length (match-string 1 l)))))
+    (if (or (null shallowest) (= shallowest level))
+        text
+      (let ((delta (- level shallowest)))
+        (mapconcat
+         (lambda (l)
+           (if (string-match orgx-capture-shell--heading-line-regexp l)
+               (concat (make-string (max 1 (+ (length (match-string 1 l)) delta)) ?*)
+                       (substring l (match-end 1)))
+             l))
+         lines "\n")))))
+
+(defun orgx-capture-shell--headline-path (headline)
+  "Split HEADLINE into a list of outline path segments."
+  (and headline
+       (split-string headline (regexp-quote orgx-capture-shell-headline-separator)
+                     t "[ \t]+")))
+
+(defun orgx-capture-shell--locate (headline)
+  "Find, creating as needed, the insertion point for entries under HEADLINE.
+HEADLINE is an outline path; each segment is searched among the
+descendants of the previous one.  Missing segments are created with the
+correct nesting.  Returns (LEVEL . POSITION) where LEVEL is the level of the
+parent heading (0 at top level) and POSITION is the end of its subtree.
+Must be called with the buffer widened."
+  (let ((level 0)
+        (beg (point-min))
+        (end (point-max)))
+    (dolist (seg (orgx-capture-shell--headline-path headline))
+      (let ((found nil))
+        (goto-char beg)
+        (while (and (not found)
+                    (re-search-forward "^\\(\\*+\\) " end t))
+          (when (and (> (length (match-string 1)) level)
+                     (string-equal (org-get-heading t t t t) seg))
+            (setq found (match-beginning 0))))
+        (if found
+            (progn
+              (goto-char found)
+              (setq level (length (progn (looking-at "\\*+") (match-string 0))))
+              (setq beg found)
+              (org-end-of-subtree t t)
+              (setq end (point)))
+          (goto-char end)
+          (unless (bolp) (insert "\n"))
+          (setq beg (point))
+          (insert (make-string (1+ level) ?*) " " seg "\n")
+          (setq level (1+ level))
+          (setq end (point)))))
+    (cons level end)))
+
 (defun orgx-capture-shell--insert-entry (file headline entry-text)
   "Insert ENTRY-TEXT under HEADLINE in FILE.
-Returns a record (FILE MARKER-POS ENTRY-TEXT) for the undo ring."
+HEADLINE may be a nested outline path.  Headings in ENTRY-TEXT are
+re-leveled to be children of the target.  Returns a record
+\(FILE MARKER-POS ENTRY-TEXT) for the undo ring."
   (let* ((expanded (expand-file-name file))
          (dir (file-name-directory expanded)))
     (when (and dir (not (file-directory-p dir)))
@@ -157,42 +244,68 @@ Returns a record (FILE MARKER-POS ENTRY-TEXT) for the undo ring."
           (org-mode))
         (let ((rec (save-excursion
                      (org-with-wide-buffer
-                      (goto-char (point-min))
-                      (let ((found nil))
-                        (if (and headline (not (string-empty-p headline)))
-                            (progn
-                              (while (and (not found) (re-search-forward org-heading-regexp nil t))
-                                (when (string-equal (org-get-heading t t t t) headline)
-                                  (setq found (point))))
-                              (if found
-                                  (progn
-                                    (goto-char found)
-                                    (org-end-of-subtree t t)
-                                    (unless (bolp) (insert "\n"))
-                                    (let ((pos (point)))
-                                      (insert entry-text "\n")
-                                      (save-buffer)
-                                      (list expanded pos entry-text)))
-                                ;; Headline not found: create it at top level or end of file
-                                (goto-char (point-max))
-                                (unless (bolp) (insert "\n"))
-                                (insert "* " headline "\n")
-                                (let ((pos (point)))
-                                  (insert entry-text "\n")
-                                  (save-buffer)
-                                  (list expanded pos entry-text))))
-                          ;; No headline: append at end of file
-                          (goto-char (point-max))
-                          (unless (bolp) (insert "\n"))
-                          (let ((pos (point)))
-                            (insert entry-text "\n")
-                            (save-buffer)
-                            (list expanded pos entry-text))))))))
+                      (let* ((ctx (orgx-capture-shell--locate headline))
+                             (text (orgx-capture-shell--relevel entry-text (1+ (car ctx)))))
+                        (goto-char (cdr ctx))
+                        (unless (bolp) (insert "\n"))
+                        (let ((pos (point)))
+                          (insert text "\n")
+                          (save-buffer)
+                          (list expanded pos text)))))))
           (push rec orgx-capture-shell-undo-ring)
           (when (> (length orgx-capture-shell-undo-ring) orgx-capture-shell-undo-ring-max)
             (setq orgx-capture-shell-undo-ring
                   (seq-take orgx-capture-shell-undo-ring orgx-capture-shell-undo-ring-max)))
           rec)))))
+
+(defun orgx-capture-shell--buffer-headline-paths ()
+  "Return outline paths of all headings in the current buffer."
+  (let (stack paths)
+    (org-with-wide-buffer
+     (goto-char (point-min))
+     (while (re-search-forward "^\\(\\*+\\) " nil t)
+       (let ((lvl (length (match-string 1)))
+             (title (org-get-heading t t t t)))
+         (while (and stack (>= (caar stack) lvl)) (pop stack))
+         (push (cons lvl title) stack)
+         (push (mapconcat #'cdr (reverse stack)
+                          orgx-capture-shell-headline-separator)
+               paths))))
+    (nreverse paths)))
+
+(defun orgx-capture-shell--headline-paths (file)
+  "Return outline paths of the headings in FILE, or nil if it doesn't exist."
+  (when (and file (file-exists-p file))
+    (if-let* ((buf (get-file-buffer (expand-file-name file))))
+        (with-current-buffer buf (orgx-capture-shell--buffer-headline-paths))
+      (with-temp-buffer
+        (insert-file-contents file)
+        (delay-mode-hooks (org-mode))
+        (orgx-capture-shell--buffer-headline-paths)))))
+
+(cl-defun orgx-capture-shell--capture (text &key (template orgx-capture-shell-current-template)
+                                            (file orgx-capture-shell-current-file)
+                                            (headline orgx-capture-shell-current-headline)
+                                            body)
+  "Capture TEXT (plus optional BODY) using TEMPLATE under HEADLINE in FILE.
+Missing FILE falls back to the resolved default target.  Returns a
+description string."
+  (unless file
+    (let ((res (orgx-capture-shell--resolve-target)))
+      (setq file (car res))
+      (when (or (null headline) (string-empty-p headline))
+        (setq headline (cdr res)))))
+  (let* ((entry (orgx-capture-shell--format-entry text template))
+         (entry (if (and body (not (string-empty-p (string-trim body))))
+                    (concat entry "\n" (string-trim-right body))
+                  entry)))
+    (orgx-capture-shell--insert-entry file headline entry)
+    (format "Captured -> [%s%s] %s"
+            (file-name-nondirectory file)
+            (if (and headline (not (string-empty-p headline)))
+                (format ":%s" headline)
+              "")
+            entry)))
 
 (defun orgx-capture-shell--undo-last ()
   "Undo the most recently captured entry from `orgx-capture-shell-undo-ring'."
@@ -218,22 +331,181 @@ Returns a record (FILE MARKER-POS ENTRY-TEXT) for the undo ring."
         (format "Undid capture: \"%s\" from %s" (string-trim text) (file-name-nondirectory file)))
     "Undo ring is empty."))
 
+;;; Capture form
+
+(defvar orgx-capture-shell--force-form nil
+  "When non-nil, the input sender treats the current input as a form request.")
+
+(defvar orgx-capture-shell--form nil
+  "Plist of values (:title :body :template :file :headline) for the transient form.")
+
+(defun orgx-capture-shell--form-defaults ()
+  "Return a plist (:file :headline :template) of defaults for a capture form.
+Values come from the shell buffer when it exists, else from target resolution."
+  (let ((read-defaults
+         (lambda ()
+           (if orgx-capture-shell-current-file
+               (list :file orgx-capture-shell-current-file
+                     :headline orgx-capture-shell-current-headline
+                     :template orgx-capture-shell-current-template)
+             (let ((res (orgx-capture-shell--resolve-target)))
+               (list :file (car res)
+                     :headline (cdr res)
+                     :template orgx-capture-shell-current-template))))))
+    (if-let* ((buf (get-buffer orgx-capture-shell-buffer-name)))
+        (with-current-buffer buf (funcall read-defaults))
+      (funcall read-defaults))))
+
+(defun orgx-capture-shell--read-template (default)
+  "Prompt for a template, offering DEFAULT (a symbol)."
+  (intern (completing-read "Template: "
+                           (mapcar #'symbol-name orgx-capture-shell-templates)
+                           nil t nil nil (symbol-name default))))
+
+(defun orgx-capture-shell--read-file (default)
+  "Prompt for a target file, offering DEFAULT."
+  (expand-file-name
+   (read-file-name "Target file: " nil default nil (and default (abbreviate-file-name default)))))
+
+(defun orgx-capture-shell--read-headline (file default)
+  "Prompt for a headline path in FILE, offering DEFAULT."
+  (completing-read "Headline (path, empty for top): "
+                   (orgx-capture-shell--headline-paths file)
+                   nil nil default))
+
+(defun orgx-capture-shell--form-read (initial defaults)
+  "Prompt for each form field, starting with title INITIAL, using DEFAULTS.
+Returns a form plist, or nil when the title is empty."
+  (let ((title (string-trim (read-string "Title: " initial))))
+    (unless (string-empty-p title)
+      (let* ((template (orgx-capture-shell--read-template (plist-get defaults :template)))
+             (file (orgx-capture-shell--read-file (plist-get defaults :file)))
+             (headline (orgx-capture-shell--read-headline file (plist-get defaults :headline)))
+             (body (read-string "Body (optional): ")))
+        (list :title title :template template :file file
+              :headline headline :body body)))))
+
+(defun orgx-capture-shell--form-commit (form)
+  "Capture the values in FORM and return a description string."
+  (let ((title (string-trim (or (plist-get form :title) ""))))
+    (if (string-empty-p title)
+        "Capture cancelled (empty title)."
+      (orgx-capture-shell--capture title
+                                   :template (plist-get form :template)
+                                   :file (plist-get form :file)
+                                   :headline (plist-get form :headline)
+                                   :body (plist-get form :body)))))
+
+(defun orgx-capture-shell--run-form (&optional initial)
+  "Collect a capture form seeded with title INITIAL.
+Uses `orgx-capture-shell-form-style'.
+Returns a message string."
+  (let ((defaults (orgx-capture-shell--form-defaults)))
+    (pcase orgx-capture-shell-form-style
+      ('transient
+       (setq orgx-capture-shell--form (plist-put (copy-sequence defaults) :title (or initial "")))
+       (orgx-capture-shell-form-transient)
+       "Capture form opened.")
+      (_
+       (condition-case nil
+           (if-let* ((form (orgx-capture-shell--form-read (or initial "") defaults)))
+               (orgx-capture-shell--form-commit form)
+             "Capture cancelled (empty title).")
+         (quit "Capture cancelled."))))))
+
+;;;###autoload
+(defun orgx-capture-shell-form (&optional initial)
+  "Capture a task via the form, seeded with title INITIAL."
+  (interactive)
+  (message "%s" (orgx-capture-shell--run-form initial)))
+
+(defun orgx-capture-shell-form-set-title ()
+  "Set the title in the transient capture form."
+  (interactive)
+  (setq orgx-capture-shell--form
+        (plist-put orgx-capture-shell--form :title
+                   (read-string "Title: " (plist-get orgx-capture-shell--form :title)))))
+
+(defun orgx-capture-shell-form-set-body ()
+  "Set the body in the transient capture form."
+  (interactive)
+  (setq orgx-capture-shell--form
+        (plist-put orgx-capture-shell--form :body
+                   (read-string "Body: " (plist-get orgx-capture-shell--form :body)))))
+
+(defun orgx-capture-shell-form-set-template ()
+  "Set the template in the transient capture form."
+  (interactive)
+  (setq orgx-capture-shell--form
+        (plist-put orgx-capture-shell--form :template
+                   (orgx-capture-shell--read-template
+                    (plist-get orgx-capture-shell--form :template)))))
+
+(defun orgx-capture-shell-form-set-file ()
+  "Set the target file in the transient capture form."
+  (interactive)
+  (setq orgx-capture-shell--form
+        (plist-put orgx-capture-shell--form :file
+                   (orgx-capture-shell--read-file
+                    (plist-get orgx-capture-shell--form :file)))))
+
+(defun orgx-capture-shell-form-set-headline ()
+  "Set the target headline in the transient capture form."
+  (interactive)
+  (setq orgx-capture-shell--form
+        (plist-put orgx-capture-shell--form :headline
+                   (orgx-capture-shell--read-headline
+                    (plist-get orgx-capture-shell--form :file)
+                    (plist-get orgx-capture-shell--form :headline)))))
+
+(defun orgx-capture-shell-form-commit ()
+  "Capture the transient form's values."
+  (interactive)
+  (message "%s" (orgx-capture-shell--form-commit orgx-capture-shell--form))
+  (setq orgx-capture-shell--form nil))
+
+(defun orgx-capture-shell--form-field (key label)
+  "Return a description function showing LABEL and the form value at KEY."
+  (lambda ()
+    (let ((v (plist-get orgx-capture-shell--form key)))
+      (format "%s: %s" label
+              (propertize (format "%s" (if (member v '(nil "")) "-" v))
+                          'face 'transient-value)))))
+
+(transient-define-prefix orgx-capture-shell-form-transient ()
+  "Transient capture form."
+  ["Capture form"
+   ("t" orgx-capture-shell-form-set-title :transient t
+    :description (lambda () (funcall (orgx-capture-shell--form-field :title "Title"))))
+   ("b" orgx-capture-shell-form-set-body :transient t
+    :description (lambda () (funcall (orgx-capture-shell--form-field :body "Body"))))
+   ("m" orgx-capture-shell-form-set-template :transient t
+    :description (lambda () (funcall (orgx-capture-shell--form-field :template "Template"))))
+   ("f" orgx-capture-shell-form-set-file :transient t
+    :description (lambda () (funcall (orgx-capture-shell--form-field :file "File"))))
+   ("h" orgx-capture-shell-form-set-headline :transient t
+    :description (lambda () (funcall (orgx-capture-shell--form-field :headline "Headline"))))]
+  ["Finish"
+   ("c" "Capture" orgx-capture-shell-form-commit)
+   ("q" "Cancel" transient-quit-one)])
+
 ;;; Slash command dispatcher
 
 (defun orgx-capture-shell--prompt-string ()
-  "Return the prompt string reflecting current target."
+  "Return the prompt string reflecting current target and template."
   (let ((file-name (if orgx-capture-shell-current-file
                        (file-name-nondirectory orgx-capture-shell-current-file)
                      "none"))
         (hl (or orgx-capture-shell-current-headline "")))
-    (format "orgx-capture [%s%s]> "
+    (format "orgx-capture [%s%s|%s]> "
             file-name
-            (if (string-empty-p hl) "" (format ":%s" hl)))))
+            (if (string-empty-p hl) "" (format ":%s" hl))
+            orgx-capture-shell-current-template)))
 
 (defun orgx-capture-shell--execute-slash-command (cmd-line)
   "Execute a slash command CMD-LINE (e.g. \"/target foo.org:Tasks\")."
   (let* ((parts (split-string (string-remove-prefix "/" cmd-line) "[ \t]+" t))
-         (verb (downcase (car parts)))
+         (verb (downcase (or (car parts) "")))
          (args (string-join (cdr parts) " ")))
     (pcase verb
       ((or "target" "t")
@@ -241,11 +513,12 @@ Returns a record (FILE MARKER-POS ENTRY-TEXT) for the undo ring."
            (format "Current target: %s [%s]"
                    (or orgx-capture-shell-current-file "none")
                    (or orgx-capture-shell-current-headline "none"))
-         (let* ((split (split-string args ":" t))
-                (f (car split))
-                (h (cadr split)))
+         (let* ((colon (string-search ":" args))
+                (f (if colon (substring args 0 colon) args))
+                (h (and colon (substring args (1+ colon)))))
            (setq orgx-capture-shell-current-file (expand-file-name f))
-           (when h (setq orgx-capture-shell-current-headline h))
+           (when (and h (not (string-empty-p h)))
+             (setq orgx-capture-shell-current-headline h))
            (format "Target set to %s [%s]"
                    (file-name-nondirectory orgx-capture-shell-current-file)
                    (or orgx-capture-shell-current-headline "none")))))
@@ -253,11 +526,13 @@ Returns a record (FILE MARKER-POS ENTRY-TEXT) for the undo ring."
        (if (string-empty-p args)
            (format "Current template: %s" orgx-capture-shell-current-template)
          (let ((sym (intern (downcase args))))
-           (if (memq sym '(task note journal plain))
+           (if (memq sym orgx-capture-shell-templates)
                (progn
                  (setq orgx-capture-shell-current-template sym)
                  (format "Template switched to: %s" sym))
              (format "Unknown template: %s (choose task, note, journal, plain)" args)))))
+      ("form"
+       (orgx-capture-shell--run-form args))
       ("denote"
        (if (fboundp 'denote-directory-files)
            (let* ((files (denote-directory-files))
@@ -287,6 +562,7 @@ Returns a record (FILE MARKER-POS ENTRY-TEXT) for the undo ring."
                   '("Available slash commands:"
                     "  /target [file[:headline]]  - Switch capture target file and headline"
                     "  /template [task|note|journal|plain] - Switch capture formatting template"
+                    "  /form [title]             - Capture via a form (also: end a line with the form trigger, or C-RET)"
                     "  /denote                   - Pick a denote note as capture target"
                     "  /undo                     - Undo the most recently captured item"
                     "  /recent, /list            - Display recently captured items"
@@ -298,54 +574,92 @@ Returns a record (FILE MARKER-POS ENTRY-TEXT) for the undo ring."
 
 ;;; Comint input filter and handler
 
+(defun orgx-capture-shell--form-triggered-p (input)
+  "Return non-nil when INPUT ends with a single `orgx-capture-shell-form-trigger'.
+A doubled trigger is an escape: it captures INPUT with one trigger removed."
+  (and orgx-capture-shell-form-trigger
+       (not (string-empty-p orgx-capture-shell-form-trigger))
+       (string-suffix-p orgx-capture-shell-form-trigger input)
+       (not (string-suffix-p (concat orgx-capture-shell-form-trigger
+                                     orgx-capture-shell-form-trigger)
+                             input))))
+
+(defun orgx-capture-shell--unescape-trigger (input)
+  "Drop one trigger from INPUT if it ends with a doubled trigger."
+  (let ((trigger orgx-capture-shell-form-trigger))
+    (if (and trigger (not (string-empty-p trigger))
+             (string-suffix-p (concat trigger trigger) input))
+        (string-remove-suffix trigger input)
+      input)))
+
 (defun orgx-capture-shell-input-sender (proc input)
   "Send and process INPUT from the comint prompt via PROC."
-  (let ((trimmed (string-trim input)))
-    (unless (string-empty-p trimmed)
-      (if (string-prefix-p "/" trimmed)
-          (let ((msg (orgx-capture-shell--execute-slash-command trimmed)))
-            (unless (string-empty-p msg)
-              (comint-output-filter proc (concat msg "\n"))))
-        ;; Regular capture
-        (unless orgx-capture-shell-current-file
-          (let ((res (orgx-capture-shell--resolve-target)))
-            (setq orgx-capture-shell-current-file (car res))
-            (setq orgx-capture-shell-current-headline (cdr res))))
-        (let* ((formatted (orgx-capture-shell--format-entry
-                           trimmed
-                           orgx-capture-shell-current-template))
-               (_ (orgx-capture-shell--insert-entry
-                     orgx-capture-shell-current-file
-                     orgx-capture-shell-current-headline
-                     formatted)))
-          (comint-output-filter
-           proc
-           (format "Captured -> [%s%s] %s\n"
-                   (file-name-nondirectory orgx-capture-shell-current-file)
-                   (if orgx-capture-shell-current-headline
-                       (format ":%s" orgx-capture-shell-current-headline)
-                     "")
-                   formatted))))))
+  (let* ((trimmed (string-trim input))
+         (force orgx-capture-shell--force-form)
+         (msg
+          (cond
+           ((string-prefix-p "/" trimmed)
+            (orgx-capture-shell--execute-slash-command trimmed))
+           ((or force (and (not (string-empty-p trimmed))
+                           (orgx-capture-shell--form-triggered-p trimmed)))
+            (orgx-capture-shell--run-form
+             (string-trim (string-remove-suffix
+                           (or orgx-capture-shell-form-trigger "") trimmed))))
+           ((not (string-empty-p trimmed))
+            (unless orgx-capture-shell-current-file
+              (let ((res (orgx-capture-shell--resolve-target)))
+                (setq orgx-capture-shell-current-file (car res))
+                (setq orgx-capture-shell-current-headline (cdr res))))
+            (orgx-capture-shell--capture
+             (orgx-capture-shell--unescape-trigger trimmed))))))
+    (when (and msg (not (string-empty-p msg)))
+      (comint-output-filter proc (concat msg "\n"))))
   ;; Update prompt with current target
-  (setq-local comint-prompt-regexp (rx bol "orgx-capture " (* nonl) "> "))
   (comint-output-filter proc (orgx-capture-shell--prompt-string)))
+
+(defun orgx-capture-shell-send-form ()
+  "Send the current input to the capture form, regardless of the trigger."
+  (interactive)
+  (let ((orgx-capture-shell--force-form t))
+    (comint-send-input)))
 
 ;;; Completion at point
 
 (defconst orgx-capture-shell-commands
-  '("/target" "/template" "/denote" "/undo" "/recent" "/list" "/clear" "/help")
+  '("/target" "/template" "/form" "/denote" "/undo" "/recent" "/list" "/clear" "/help")
   "List of recognized slash commands in orgx-capture-shell.")
 
+(defun orgx-capture-shell--input-start ()
+  "Return the buffer position where user input begins on the current line."
+  (save-excursion
+    (beginning-of-line)
+    (if (looking-at orgx-capture-shell--prompt-regexp)
+        (match-end 0)
+      (point))))
+
 (defun orgx-capture-shell-completion-at-point ()
-  "Completion at point function for orgx-capture-shell slash commands."
-  (let ((bounds (bounds-of-thing-at-point 'symbol)))
-    (when bounds
-      (let ((word (buffer-substring-no-properties (car bounds) (cdr bounds))))
-        (when (string-prefix-p "/" word)
-          (list (car bounds)
-                (cdr bounds)
-                orgx-capture-shell-commands
-                :exclusive 'no))))))
+  "Completion at point function for orgx-capture-shell slash commands.
+Completes command names, `/template' names, and `/target' files and headlines."
+  (let* ((start (orgx-capture-shell--input-start))
+         (line (buffer-substring-no-properties start (point))))
+    (cond
+     ((string-match "\\`/\\S-*\\'" line)
+      (list start (point) orgx-capture-shell-commands :exclusive 'no))
+     ((string-match "\\`/\\(?:template\\|tpl\\)[ \t]+\\(\\S-*\\)\\'" line)
+      (list (+ start (match-beginning 1)) (point)
+            (mapcar #'symbol-name orgx-capture-shell-templates)
+            :exclusive 'no))
+     ((string-match "\\`/\\(?:target\\|t\\)[ \t]+\\(.*\\)\\'" line)
+      (let* ((arg (match-string 1 line))
+             (arg-start (+ start (match-beginning 1)))
+             (colon (string-search ":" arg)))
+        (if colon
+            (list (+ arg-start colon 1) (point)
+                  (orgx-capture-shell--headline-paths
+                   (expand-file-name (substring arg 0 colon)))
+                  :exclusive 'no)
+          (list arg-start (point) #'completion-file-name-table
+                :exclusive 'no)))))))
 
 ;;; Major Mode Definition
 
@@ -353,12 +667,13 @@ Returns a record (FILE MARKER-POS ENTRY-TEXT) for the undo ring."
   :doc "Keymap for `orgx-capture-shell-mode'."
   :parent comint-mode-map
   "C-c C-u" #'orgx-capture-shell--undo-last
-  "C-c C-k" #'comint-kill-input)
+  "C-c C-k" #'comint-kill-input
+  "C-<return>" #'orgx-capture-shell-send-form)
 
 (define-derived-mode orgx-capture-shell-mode comint-mode "orgx-shell"
   "Major mode for the interactive `orgx-capture-shell' REPL.
 \\{orgx-capture-shell-mode-map}"
-  (setq comint-prompt-regexp (rx bol "orgx-capture " (* nonl) "> "))
+  (setq comint-prompt-regexp orgx-capture-shell--prompt-regexp)
   (setq comint-use-prompt-regexp t)
   (setq comint-input-sender #'orgx-capture-shell-input-sender)
   (setq-local fill-column 80)
@@ -428,7 +743,7 @@ window.  If it is hidden or not active, display it in the bottom popup window."
 (defun orgx-capture-shell-set-template (template)
   "Set the active capture TEMPLATE."
   (interactive
-   (list (intern (completing-read "Template: " '("task" "note" "journal" "plain") nil t))))
+   (list (intern (completing-read "Template: " (mapcar #'symbol-name orgx-capture-shell-templates) nil t))))
   (setq orgx-capture-shell-current-template template)
   (message "Template set to %s" template))
 
@@ -465,6 +780,7 @@ window.  If it is hidden or not active, display it in the bottom popup window."
    ["Actions"
     ("s" "Launch / Focus Shell" orgx-capture-shell)
     ("t" "Toggle Popup Window" orgx-capture-shell-toggle)
+    ("F" "Capture Form" orgx-capture-shell-form)
     ("u" "Undo Last Capture" orgx-capture-shell-undo-command)
     ("o" "Visit Current Target" orgx-capture-shell-visit-target-command)]
    ["Switch Modality"
