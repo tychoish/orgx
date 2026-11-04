@@ -114,6 +114,20 @@
       (clrhash orgx-bulk--plans)
       (should (= (length (orgx-bulk-list-plans)) 1)))))
 
+(ert-deftest orgx-bulk-add-op-reopens-complete-plan-test ()
+  (orgx-bulk-test--with-env f "* TODO Alpha\n"
+    (let ((plan (orgx-bulk-create-plan :targets (orgx-bulk-test--targets f)
+                                       :ops '((todo-state "DONE")))))
+      (orgx-bulk-execute plan)
+      (should (eq (orgx-bulk-plan-status plan) 'complete))
+      (orgx-bulk-plan-add-op plan (orgx-bulk-op--create :name 'tag-add :args '("x")))
+      (should (eq (orgx-bulk-plan-status plan) 'paused))
+      (orgx-bulk-execute plan)
+      (should (eq (orgx-bulk-plan-status plan) 'complete))
+      (with-current-buffer (find-file-noselect f)
+        (should (member "x" (org-with-wide-buffer (goto-char (point-min))
+                                                  (org-get-tags))))))))
+
 ;;; Target Resolution
 
 (ert-deftest orgx-bulk-resolve-target-id-path-and-siblings-test ()

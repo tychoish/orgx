@@ -648,6 +648,10 @@ returns PLAN."
          (all-ops (orgx-bulk-order-ops (append (orgx-bulk-plan-ops plan) (list op-struct))))
          (all-steps (append (orgx-bulk-plan-steps plan) new-steps)))
     (setf (orgx-bulk-plan-ops plan) all-ops)
+    ;; New pending steps need a runnable plan.
+    (when (and (eq (orgx-bulk-plan-status plan) 'complete)
+               (seq-some (lambda (s) (eq (orgx-bulk-step-status s) 'pending)) new-steps))
+      (setf (orgx-bulk-plan-status plan) 'paused))
     ;; Keep steps ordered by their operation's position in `all-ops'.
     (setf (orgx-bulk-plan-steps plan)
           (seq-mapcat (lambda (o)
