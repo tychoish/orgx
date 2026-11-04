@@ -730,37 +730,13 @@ returns PLAN."
      (seq-group-by (lambda (s) (plist-get (orgx-bulk-step-target s) :file))
                    done-steps))))
 
-(defun orgx-bulk--ensure-minimal-agenda (markers &optional buf-name)
-  "Create or update `org-agenda-mode' buffer BUF-NAME holding MARKERS."
-  (let ((buf (get-buffer-create (or buf-name "*Org Agenda(orgx-bulk)*"))))
-    (with-current-buffer buf
-      (let ((inhibit-read-only t))
-        (unless (derived-mode-p 'org-agenda-mode)
-          (org-agenda-mode))
-        ;; Ensure every marker has an agenda line with `eq' `org-hd-marker'.
-        (dolist (m markers)
-          (unless (text-property-any (point-min) (point-max) 'org-hd-marker m)
-            (goto-char (point-max))
-            (let ((start (point))
-                  (heading (if (and (markerp m) (marker-buffer m))
-                               (org-with-point-at m (org-get-heading t t t t))
-                             "entry")))
-              (insert (format "  bulk:        %s\n" heading))
-              (add-text-properties start (1- (point))
-                                   (list 'org-hd-marker m
-                                         'org-marker m
-                                         'todo-state (and (marker-buffer m)
-                                                          (org-with-point-at m
-                                                            (org-get-todo-state))))))))))
-    buf))
-
 (defun orgx-bulk-execute (plan &optional only-op)
   "Execute pending steps of PLAN (or ONLY-OP) through `org-agenda-bulk-action'.
 Skips `done' and `skipped' steps.  Catches `quit', marks the plan `paused',
 and saves.  Saves PLAN after each operation completes and runs
 `orgx-bulk-step-functions' and `orgx-bulk-after-apply-functions'."
-  (require 'orgx-bulk-ops nil t)
-  (require 'orgx-bulk-agenda nil t)
+  (require 'orgx-bulk-ops)
+  (require 'orgx-bulk-agenda)
   (when (eq (orgx-bulk-plan-status plan) 'discarded)
     (user-error "Plan %s is discarded" (orgx-bulk-plan-id plan)))
   (when (eq (orgx-bulk-plan-status plan) 'complete)
@@ -806,12 +782,7 @@ and saves.  Saves PLAN after each operation completes and runs
                       resolved-markers (nreverse resolved-markers))
                 (when resolved-markers
                   (let* ((agenda-pair
-                          (if (fboundp 'orgx-bulk-batch-ensure-agenda)
-                              (orgx-bulk-batch-ensure-agenda plan resolved-markers)
-                            (cons (orgx-bulk--ensure-minimal-agenda
-                                   resolved-markers
-                                   (plist-get (orgx-bulk-plan-scope plan) :buffer-name))
-                                  resolved-markers)))
+                          (orgx-bulk-batch-ensure-agenda plan resolved-markers))
                          (agenda-buf (car agenda-pair))
                          (batch-markers (cdr agenda-pair))
                          ;; Remap step-map keys to the exact `eq' markers in agenda-buf.
