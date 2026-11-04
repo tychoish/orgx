@@ -1,0 +1,29 @@
+#+title: Refile to Agent Shell
+#+author: tychoish
+#+language: en
+
+=orgx-refile-agent.el= adds agent-shell targets to ~org-refile~ (=C-c o w=, and =r= in the agenda via ~org-agenda-refile~).
+
+* Usage
+
+Press ~org-refile~ on a heading. Besides the usual Org targets, the list contains:
+- =agent-shell: (unassigned queue)=
+- =agent-shell: <buffer>= for each live agent-shell session
+
+Choosing one opens an agent-shell-queue capture buffer seeded with the subtree (edit, then =C-c C-c= to queue or =C-c C-k= to cancel). Nothing is moved to an Org file.
+
+The targets appear only while ~org-refile~ prompts, so bulk refile and other callers of ~org-refile-get-location~ are unchanged. They are not offered with the jump prefix (=C-u=) or with an active region. When refiling as a copy (prefix =3=, ~org-refile-copy~), the original is always kept and you are not asked. The agent entry is not remembered in ~org-refile-history~.
+
+* Original heading
+
+After choosing a target you are asked what to do with the original heading (=orgx-refile-agent-original-action=):
+- =keep= :: leave it in place.
+- =remove= :: cut the subtree; it stays in the kill ring. The action runs when the capture buffer opens, so cancelling the capture does not restore it.
+- =mark= :: set the TODO state =orgx-refile-agent-mark-state= (default =INPROGRESS=).
+- =ask= (default) :: prompt each time. Set the option to one of the others to skip the prompt.
+
+Only the subtree at point is sent.
+
+* Setup
+
+~orgx-setup~ enables the advice. Use ~orgx-refile-agent-enable~ / ~orgx-refile-agent-disable~ directly otherwise. Requires =agent-shell= and =agent-shell-queue=.

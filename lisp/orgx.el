@@ -30,6 +30,7 @@
 (require 'org-capture)
 (require 'annotated-completing-read)
 (require 'org-refile)
+(require 'orgx-refile-agent)
 (require 'org-agenda)
 (require 'org-archive)
 (require 'ol)
@@ -916,7 +917,8 @@ Activates `orgx-command-map' under C-c o."
   (advice-add 'toc-org-hrefify-gh :around #'orgx--toc-hrefify-priority)
   (advice-add 'org-agenda-redo :around #'orgx--ad-org-agenda-redo)
   (advice-add 'org-link-open-as-file :around #'orgx-link-github-line-support)
-  (add-hook 'org-open-link-functions #'orgx-open-custom-id-slug-fallback))
+  (add-hook 'org-open-link-functions #'orgx-open-custom-id-slug-fallback)
+  (orgx-refile-agent-enable))
 
 (defun orgx--disable-advice ()
   "Disable orgx advice and link hooks."
@@ -924,7 +926,8 @@ Activates `orgx-command-map' under C-c o."
   (advice-remove 'toc-org-hrefify-gh #'orgx--toc-hrefify-priority)
   (advice-remove 'org-agenda-redo #'orgx--ad-org-agenda-redo)
   (advice-remove 'org-link-open-as-file #'orgx-link-github-line-support)
-  (remove-hook 'org-open-link-functions #'orgx-open-custom-id-slug-fallback))
+  (remove-hook 'org-open-link-functions #'orgx-open-custom-id-slug-fallback)
+  (orgx-refile-agent-disable))
 
 ;;;###autoload
 (defun orgx-setup ()
