@@ -16,6 +16,12 @@
   (loaddefs-generate orgx-dir loaddefs-file)
   (load loaddefs-file nil t))
 
+(defun orgx-test--org-mode ()
+  "Enter `org-mode' without running `org-mode-hook'.
+Other tests may leave `orgx-mode-turn-on' on the hook."
+  (let ((org-mode-hook nil))
+    (org-mode)))
+
 (ert-deftest orgx-date-now-test ()
   "Test formatting of current date timestamp."
   (let ((long-now (orgx-date-now))
@@ -38,7 +44,7 @@
   "orgx-mode enables visual-line-mode and disabling it restores the buffer."
   (let ((orgx--setup-done t))
     (with-temp-buffer
-      (org-mode)
+      (orgx-test--org-mode)
       (should orgx-use-visual-line)
       (orgx-mode 1)
       (should visual-line-mode)
@@ -50,7 +56,7 @@
   (let ((orgx--setup-done t)
         (orgx-use-visual-line nil))
     (with-temp-buffer
-      (org-mode)
+      (orgx-test--org-mode)
       (orgx-mode 1)
       (should-not visual-line-mode)
       (orgx-mode -1)
@@ -60,7 +66,7 @@
   "A visual-line-mode the user enabled is not turned off by orgx-mode."
   (let ((orgx--setup-done t))
     (with-temp-buffer
-      (org-mode)
+      (orgx-test--org-mode)
       (visual-line-mode 1)
       (orgx-mode 1)
       (orgx-mode -1)
@@ -84,7 +90,7 @@
      (unwind-protect
          (with-temp-buffer
            (insert ,text)
-           (org-mode)
+           (orgx-test--org-mode)
            ,@body)
        (advice-remove 'org-table--shrink-field #'orgx--ad-table-shrink-field))))
 
@@ -207,7 +213,7 @@
   (let ((orgx-table-shrink-width 12))
     (with-temp-buffer
       (let ((orgx--setup-done t))
-        (org-mode)
+        (orgx-test--org-mode)
         (orgx-mode 1)
         ;; no cookie (width 0): default width
         (should (equal (orgx--ad-table-shrink-field (list 0 "l" 1 2 "x")) '(12 "l" 1 2 "x")))
@@ -232,7 +238,7 @@
 (ert-deftest orgx-mode-setup-test ()
   "Test that activating orgx-mode applies local settings."
   (with-temp-buffer
-    (org-mode)
+    (orgx-test--org-mode)
     (orgx-mode 1)
     (should orgx-mode)
     (should org-return-follows-link)
@@ -258,7 +264,7 @@
 (ert-deftest orgx-mode-managed-settings-revert-test ()
   "Test that orgx-mode cleanly reverts buffer-local settings."
   (with-temp-buffer
-    (org-mode)
+    (orgx-test--org-mode)
     (setq-local fill-column 80)
     (setq-local org-tags-column -60)
     (orgx-mode 1)
@@ -336,7 +342,7 @@
     (add-hook 'orgx-setup-hook (lambda () (setq hook-called t)))
     (unwind-protect
         (with-temp-buffer
-          (org-mode)
+          (orgx-test--org-mode)
           (orgx-mode 1)
           (should orgx--setup-done)
           (should hook-called)
@@ -422,7 +428,7 @@
   ;; replace it).
   (let ((org-todo-keywords '((sequence "TODO" "QUESTION" "|" "ANSWERED" "DONE"))))
     (with-temp-buffer
-      (org-mode)
+      (orgx-test--org-mode)
       (org-set-regexps-and-options)
       (orgx-mode 1)
       (insert "* TODO Sample question :question:\n")
@@ -435,7 +441,7 @@
   "A :question: heading may close as ANSWERED while orgx-mode is active."
   (let ((org-todo-keywords '((sequence "TODO" "QUESTION" "|" "ANSWERED" "DONE"))))
     (with-temp-buffer
-      (org-mode)
+      (orgx-test--org-mode)
       (org-set-regexps-and-options)
       (orgx-mode 1)
       (insert "* TODO Sample question :question:\n")
@@ -448,7 +454,7 @@
   "A heading without :question: closes normally with DONE while orgx-mode is active."
   (let ((org-todo-keywords '((sequence "TODO" "QUESTION" "|" "ANSWERED" "DONE"))))
     (with-temp-buffer
-      (org-mode)
+      (orgx-test--org-mode)
       (org-set-regexps-and-options)
       (orgx-mode 1)
       (insert "* TODO Ordinary task\n")
@@ -484,7 +490,7 @@
 (ert-deftest orgx-open-custom-id-slug-fallback-opens-matching-custom-id-test ()
   "Slug fallback jumps to the heading with a matching CUSTOM_ID."
   (with-temp-buffer
-    (org-mode)
+    (orgx-test--org-mode)
     (insert "* Target Heading\n:PROPERTIES:\n:CUSTOM_ID: target-id\n:END:\n")
     (should (orgx-open-custom-id-slug-fallback "#target-id"))
     (should (looking-at "\\* Target Heading"))))
@@ -492,7 +498,7 @@
 (ert-deftest orgx-open-custom-id-slug-fallback-ignores-non-id-paths-test ()
   "Paths without a leading # are left untouched."
   (with-temp-buffer
-    (org-mode)
+    (orgx-test--org-mode)
     (insert "* Target Heading\n:PROPERTIES:\n:CUSTOM_ID: target-id\n:END:\n")
     (should-not (orgx-open-custom-id-slug-fallback "target-id"))))
 
@@ -503,7 +509,7 @@
 (ert-deftest orgx-skip-child-of-project-tag-case-insensitive-test ()
   "orgx-skip-child-of-project-tag matches project tags regardless of case."
   (with-temp-buffer
-    (org-mode)
+    (orgx-test--org-mode)
     (insert "* TODO Epic Thing :EPIC:\n** TODO Subtask A\n* TODO Standalone Task\n")
     (goto-char (point-min))
     (forward-line 1)
@@ -513,7 +519,7 @@
 (ert-deftest orgx-skip-child-of-project-tag-keeps-tagged-heading-test ()
   "orgx-skip-child-of-project-tag does not skip the tagged heading itself."
   (with-temp-buffer
-    (org-mode)
+    (orgx-test--org-mode)
     (insert "* TODO Epic Thing :EPIC:\n** TODO Subtask A\n")
     (goto-char (point-min))
     (org-back-to-heading)
@@ -527,7 +533,7 @@ and switches to the one selected via `annotated-completing-read'."
         (progn
           (setq org-buf (generate-new-buffer "orgx-switch-test-org"))
           (setq other-buf (generate-new-buffer "orgx-switch-test-other"))
-          (with-current-buffer org-buf (org-mode))
+          (with-current-buffer org-buf (orgx-test--org-mode))
           (cl-letf (((symbol-function 'annotated-completing-read)
                      (lambda (table &rest _)
                        (setq captured-candidates (mapcar #'car table))
