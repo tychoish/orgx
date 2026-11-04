@@ -1,24 +1,22 @@
-;;; orgx-bulk.el --- Bulk task state changes with a review buffer -*- lexical-binding: t; -*-
+;;; orgx-bulk.el --- Resumable bulk operations driven by org-agenda-bulk-action -*- lexical-binding: t; -*-
 
 ;; Author: tychoish <tychoish@tychoish.com>
 ;; URL: https://github.com/tychoish/orgx
 ;; Keywords: org, convenience
 
 ;;; Commentary:
-;; Bulk operations on Org tasks across files or an agenda buffer.
+;; Resumable bulk operations on Org headings built on top of
+;; `org-agenda-bulk-action'.
 ;;
-;; A bulk change is two steps: build a plan (`orgx-bulk-plan'), a list of
-;; candidate headings plus a target TODO state, then review and apply it.
-;; The review buffer (`orgx-bulk-review-mode') lists every affected heading
-;; with a selection checkbox; nothing is modified until it is confirmed.
-;;
-;; Behavior attaches through two abnormal hooks:
-;; - `orgx-bulk-item-functions': called per changed heading (ITEM PLAN).
-;; - `orgx-bulk-after-apply-functions': called per touched file (FILE ITEMS PLAN),
-;;   before the buffer is saved.  `orgx-bulk-denote-sync-execution-status' is
-;;   the default and keeps a denote plan's `#+execution_status:' in step.
-;;
-;; The same plans are exposed over MCP by `orgx-mcp'.
+;; `orgx-bulk' provides:
+;; - Data model (`orgx-bulk-plan', `orgx-bulk-op', `orgx-bulk-step') with
+;;   atomic `.eld' persistence in `orgx-bulk-directory'.
+;; - Target capture and resolution by ID, outline path + heading, or position.
+;; - Operation registry (`orgx-bulk-register-op') bridged into
+;;   `org-agenda-bulk-custom-functions'.
+;; - Note-logging modes (`ignore', `one', `each') via `orgx-bulk-log-notes'.
+;; - Synchronous, quit-safe execution through `org-agenda-bulk-action'
+;;   (`orgx-bulk-execute').
 
 ;;; Code:
 
@@ -28,211 +26,886 @@
 (require 'subr-x)
 (require 'org)
 (require 'org-agenda)
+(require 'org-id)
 
 (declare-function orgx-denote-plan-file-p "orgx-denote")
 (declare-function orgx-denote-files "orgx-denote")
+(declare-function orgx-bulk-batch-for-scope "orgx-bulk-agenda")
+(declare-function orgx-bulk-batch-ensure-agenda "orgx-bulk-agenda")
+(declare-function orgx-bulk-batch-read-scope "orgx-bulk-agenda")
+(declare-function orgx-bulk-plan-buffer-name "orgx-bulk-buffer")
+(declare-function orgx-bulk-review "orgx-bulk-buffer")
+
 (defvar org-agenda-bulk-marked-entries)
+(defvar org-agenda-bulk-custom-functions)
+(defvar org-log-setup)
+(defvar org-inhibit-logging)
+(defvar org-inhibit-blocking)
+(defvar orgx-bulk--internal-marking nil)
 
 (defgroup orgx-bulk nil
   "Bulk task operations for orgx."
   :group 'orgx
   :prefix "orgx-bulk-")
 
-(defcustom orgx-bulk-item-functions nil
-  "Abnormal hook run after each heading changes state.
-Each function receives the `orgx-bulk-item' and its `orgx-bulk-plan', with
-point on the heading in the item's buffer."
+(defcustom orgx-bulk-directory (locate-user-emacs-file "orgx-bulk")
+  "Directory where saved `orgx-bulk-plan' files (`.eld') are stored."
+  :type 'directory
+  :group 'orgx-bulk)
+
+(defcustom orgx-bulk-log-notes 'ignore
+  "How bulk TODO state changes record log notes.
+- `ignore': suppress log notes (`org-inhibit-logging' is bound to t).
+- `one': record a single note message on every changed heading.
+- `each': prompt for a note on each heading at execution time and store it
+  on the step so resuming does not ask twice."
+  :type '(choice (const :tag "Ignore notes" ignore)
+                 (const :tag "One note for all headings" one)
+                 (const :tag "Prompt per heading" each))
+  :group 'orgx-bulk)
+
+(defcustom orgx-bulk-inhibit-blocking nil
+  "When non-nil, ignore Org TODO blocking rules during bulk state changes.
+By default (nil), blocking rules such as `org-enforce-todo-dependencies'
+and `org-blocker-hook' are honored and blocked steps are marked `failed'."
+  :type 'boolean
+  :group 'orgx-bulk)
+
+(defcustom orgx-bulk-assign-ids nil
+  "When non-nil, assign an `:ID:' property to targeted headings when planning."
+  :type 'boolean
+  :group 'orgx-bulk)
+
+(defvaralias 'orgx-bulk-item-functions 'orgx-bulk-step-functions)
+
+(defcustom orgx-bulk-step-functions nil
+  "Abnormal hook run after each step succeeds.
+Each function receives the `orgx-bulk-step' and its `orgx-bulk-plan', with
+point on the heading in the step's base Org buffer."
   :type 'hook
   :group 'orgx-bulk)
 
 (defcustom orgx-bulk-after-apply-functions '(orgx-bulk-denote-sync-execution-status)
-  "Abnormal hook run once per touched file after a plan is applied.
-Each function receives FILE, the list of changed `orgx-bulk-item's in it, and
+  "Abnormal hook run once per touched file after a plan executes.
+Each function receives FILE, the list of done `orgx-bulk-step's in it, and
 the `orgx-bulk-plan'.  Runs with FILE's buffer current, before it is saved."
   :type 'hook
   :group 'orgx-bulk)
 
 (defcustom orgx-bulk-save-buffers t
-  "When non-nil, save each file buffer touched by an applied plan."
+  "When non-nil, save each file buffer touched by an executed plan."
   :type 'boolean
   :group 'orgx-bulk)
 
-;;; Data
+(defconst orgx-bulk-format-version 1
+  "Format version for saved `.eld' plan files.")
 
-(cl-defstruct (orgx-bulk-item (:constructor orgx-bulk-item--create))
-  "One heading considered by a bulk plan."
-  id marker file heading from-state path (selected t) problem result)
+(defconst orgx-bulk-oab-builtin-keys
+  '(?$ ?A ?t ?+ ?- ?s ?d ?r ?w ?S ?f ?p)
+  "Action keys owned by `org-agenda-bulk-action'.")
+
+;;; Data Model
 
 (cl-defstruct (orgx-bulk-plan (:constructor orgx-bulk-plan--create))
-  "A pending, applied or discarded bulk state change."
-  id target items description (status 'pending))
+  "A saved, resumable bulk operation plan.
+STATUS is one of `draft', `running', `paused', `complete', or `discarded'."
+  id description created (status 'draft) scope
+  (log-notes orgx-bulk-log-notes) note ops steps)
+
+(cl-defstruct (orgx-bulk-op (:constructor orgx-bulk-op--create))
+  "One operation in an `orgx-bulk-plan'.
+STATUS is one of `pending', `running', `done', `failed', or `paused'."
+  name args (status 'pending))
+
+(cl-defstruct (orgx-bulk-step (:constructor orgx-bulk-step--create))
+  "One target heading and operation pairing in an `orgx-bulk-plan'.
+STATUS is one of `pending', `done', `failed', `skipped', or `missing'."
+  id target op (status 'pending) message note)
+
+(cl-defstruct (orgx-bulk-op-spec (:constructor orgx-bulk-op-spec--create))
+  "Registered operation specification."
+  name key label read-args apply describe from-json schema validate
+  queueable order-last builtin-oab)
 
 (defvar orgx-bulk--plans (make-hash-table :test #'equal)
-  "Plans by id, kept so MCP clients can refer back to them.")
+  "In-memory cache of `orgx-bulk-plan' objects keyed by ID.")
 
-(defvar orgx-bulk--counter 0)
+(defvar orgx-bulk--counter 0
+  "Monotonic counter for generating unique plan IDs.")
+
+(defun orgx-bulk--next-id ()
+  "Return a fresh plan ID string that does not collide with saved plans."
+  (let (id)
+    (while (progn
+             (setq orgx-bulk--counter (1+ orgx-bulk--counter))
+             (setq id (format "bulk-%d" orgx-bulk--counter))
+             (or (map-elt orgx-bulk--plans id)
+                 (and orgx-bulk-directory
+                      (file-exists-p (orgx-bulk-plan-file id))))))
+    id))
+
+(defun orgx-bulk-step-op-name (step)
+  "Return the operation symbol for STEP."
+  (let ((op (orgx-bulk-step-op step)))
+    (if (orgx-bulk-op-p op)
+        (orgx-bulk-op-name op)
+      op)))
+
+(defun orgx-bulk-step-op-args (step)
+  "Return the operation argument list for STEP."
+  (let ((op (orgx-bulk-step-op step)))
+    (when (orgx-bulk-op-p op)
+      (orgx-bulk-op-args op))))
+
+;;; Target Capture and Resolution
+
+(defun orgx-bulk--target-at-point ()
+  "Return a serializable target plist for the Org heading at point.
+When called in `org-agenda-mode', follows `org-hd-marker' or `org-marker'.
+Never includes a live marker."
+  (let ((marker (when (derived-mode-p 'org-agenda-mode)
+                  (or (org-get-at-bol 'org-hd-marker)
+                      (org-get-at-bol 'org-marker)))))
+    (if marker
+        (when (and (markerp marker) (marker-buffer marker))
+          (org-with-point-at marker
+            (orgx-bulk--target-at-heading)))
+      (orgx-bulk--target-at-heading))))
+
+(defun orgx-bulk--target-at-heading ()
+  "Build target plist in the current Org buffer at or inside a heading."
+  (save-excursion
+    (save-restriction
+      (widen)
+      (org-back-to-heading t)
+      (when orgx-bulk-assign-ids
+        (org-id-get-create))
+      (list :file (buffer-file-name (org-base-buffer (current-buffer)))
+            :id (org-entry-get nil "ID")
+            :outline-path (org-get-outline-path)
+            :heading (org-get-heading t t t t)
+            :pos (line-beginning-position)
+            :todo-state (org-get-todo-state)))))
+
+(defun orgx-bulk--resolve-target (target)
+  "Resolve TARGET plist to a marker on its heading, or nil if missing.
+Resolves by `:id' first, then `:outline-path' and `:heading' (closest to
+`:pos' when duplicated), and finally `:pos' with `:heading'."
+  (let ((file (plist-get target :file))
+        (id (plist-get target :id))
+        (path (plist-get target :outline-path))
+        (heading (plist-get target :heading))
+        (hint-pos (or (plist-get target :pos) 1)))
+    (when (and file (file-exists-p file))
+      (with-current-buffer (find-file-noselect file)
+        (save-excursion
+          (save-restriction
+            (widen)
+            (or
+             ;; 1. Resolve by ID property inside this file.
+             (when id
+               (let ((pos (org-find-entry-with-id id)))
+                 (when pos
+                   (goto-char pos)
+                   (org-back-to-heading t)
+                   (point-marker))))
+             ;; 2. Resolve by outline-path + heading (pick closest to hint-pos).
+             (when heading
+               (let (candidates)
+                 (goto-char (point-min))
+                 (when (org-at-heading-p)
+                   (when (and (equal (org-get-heading t t t t) heading)
+                              (equal (org-get-outline-path) path))
+                     (push (line-beginning-position) candidates)))
+                 (while (outline-next-heading)
+                   (when (and (equal (org-get-heading t t t t) heading)
+                              (equal (org-get-outline-path) path))
+                     (push (line-beginning-position) candidates)))
+                 (when candidates
+                   (let ((best (car (sort (nreverse candidates)
+                                          (lambda (a b)
+                                            (< (abs (- a hint-pos))
+                                               (abs (- b hint-pos))))))))
+                     (goto-char best)
+                     (point-marker)))))
+             ;; 3. Fallback: position hint with matching heading text.
+             (when (and hint-pos (<= (point-min) hint-pos) (<= hint-pos (point-max)))
+               (goto-char hint-pos)
+               (when (ignore-errors (org-back-to-heading t))
+                 (when (or (null heading)
+                           (equal (org-get-heading t t t t) heading))
+                   (point-marker)))))))))))
+
+;;; Persistence
+
+(defun orgx-bulk-plan-file (id)
+  "Return the absolute file path for plan ID in `orgx-bulk-directory'."
+  (expand-file-name (format "%s.eld" id) orgx-bulk-directory))
+
+(defun orgx-bulk--plan-to-plist (plan)
+  "Convert `orgx-bulk-plan' PLAN into a printable plist."
+  (let ((ops (orgx-bulk-plan-ops plan)))
+    (list :version orgx-bulk-format-version
+          :id (orgx-bulk-plan-id plan)
+          :description (orgx-bulk-plan-description plan)
+          :created (orgx-bulk-plan-created plan)
+          :status (orgx-bulk-plan-status plan)
+          :scope (orgx-bulk-plan-scope plan)
+          :log-notes (orgx-bulk-plan-log-notes plan)
+          :note (orgx-bulk-plan-note plan)
+          :ops (mapcar (lambda (op)
+                         (list :name (orgx-bulk-op-name op)
+                               :args (orgx-bulk-op-args op)
+                               :status (orgx-bulk-op-status op)))
+                       ops)
+          :steps (mapcar (lambda (step)
+                           (let* ((sop (orgx-bulk-step-op step))
+                                  (idx (and (orgx-bulk-op-p sop)
+                                            (seq-position ops sop #'eq))))
+                             (list :id (orgx-bulk-step-id step)
+                                   :target (orgx-bulk-step-target step)
+                                   :op-index idx
+                                   :op (if (orgx-bulk-op-p sop)
+                                           (list :name (orgx-bulk-op-name sop)
+                                                 :args (orgx-bulk-op-args sop)
+                                                 :status (orgx-bulk-op-status sop))
+                                         sop)
+                                   :status (orgx-bulk-step-status step)
+                                   :message (orgx-bulk-step-message step)
+                                   :note (orgx-bulk-step-note step))))
+                         (orgx-bulk-plan-steps plan)))))
+
+(defun orgx-bulk--plist-to-plan (data)
+  "Reconstruct an `orgx-bulk-plan' from plist DATA."
+  (let* ((ops (mapcar (lambda (op-pl)
+                        (orgx-bulk-op--create
+                         :name (plist-get op-pl :name)
+                         :args (plist-get op-pl :args)
+                         :status (or (plist-get op-pl :status) 'pending)))
+                      (plist-get data :ops)))
+         (steps (mapcar (lambda (st-pl)
+                          (let* ((idx (plist-get st-pl :op-index))
+                                 (raw-op (plist-get st-pl :op))
+                                 (op (cond
+                                      ((and (integerp idx) (nth idx ops))
+                                       (nth idx ops))
+                                      ((and (consp raw-op) (plistp raw-op))
+                                       (or (seq-find (lambda (o)
+                                                       (and (eq (orgx-bulk-op-name o)
+                                                                (plist-get raw-op :name))
+                                                            (equal (orgx-bulk-op-args o)
+                                                                   (plist-get raw-op :args))))
+                                                     ops)
+                                           (orgx-bulk-op--create
+                                            :name (plist-get raw-op :name)
+                                            :args (plist-get raw-op :args)
+                                            :status (or (plist-get raw-op :status) 'pending))))
+                                      ((symbolp raw-op)
+                                       (or (seq-find (lambda (o) (eq (orgx-bulk-op-name o) raw-op))
+                                                     ops)
+                                           (orgx-bulk-op--create :name raw-op)))
+                                      (t raw-op))))
+                            (orgx-bulk-step--create
+                             :id (plist-get st-pl :id)
+                             :target (plist-get st-pl :target)
+                             :op op
+                             :status (or (plist-get st-pl :status) 'pending)
+                             :message (plist-get st-pl :message)
+                             :note (plist-get st-pl :note))))
+                        (plist-get data :steps))))
+    (orgx-bulk-plan--create
+     :id (plist-get data :id)
+     :description (plist-get data :description)
+     :created (plist-get data :created)
+     :status (or (plist-get data :status) 'draft)
+     :scope (plist-get data :scope)
+     :log-notes (or (plist-get data :log-notes) 'ignore)
+     :note (plist-get data :note)
+     :ops ops
+     :steps steps)))
+
+(defun orgx-bulk-save (plan)
+  "Save PLAN to `orgx-bulk-directory' atomically via temp file + rename.
+Returns PLAN."
+  (make-directory orgx-bulk-directory t)
+  (let* ((id (orgx-bulk-plan-id plan))
+         (target-file (orgx-bulk-plan-file id))
+         (temp-file (make-temp-file
+                     (expand-file-name (format ".%s-" id) orgx-bulk-directory)
+                     nil ".tmp"))
+         (print-length nil)
+         (print-level nil))
+    (unwind-protect
+        (progn
+          (with-temp-file temp-file
+            (insert ";; -*- mode: lisp-data; -*-\n")
+            (pp (orgx-bulk--plan-to-plist plan) (current-buffer)))
+          (rename-file temp-file target-file t))
+      (when (file-exists-p temp-file)
+        (ignore-errors (delete-file temp-file)))))
+  (setf (map-elt orgx-bulk--plans (orgx-bulk-plan-id plan)) plan)
+  plan)
+
+(defun orgx-bulk-load (id-or-file)
+  "Load and return the `orgx-bulk-plan' from ID-OR-FILE.
+Signals an `error' naming the file if it is missing or corrupt."
+  (let ((file (if (and (stringp id-or-file)
+                       (or (file-name-absolute-p id-or-file)
+                           (string-suffix-p ".eld" id-or-file)
+                           (file-exists-p id-or-file)))
+                  (expand-file-name id-or-file)
+                (orgx-bulk-plan-file id-or-file))))
+    (unless (file-exists-p file)
+      (error "Corrupt or missing plan file %s: file does not exist" file))
+    (let ((data (condition-case err
+                    (with-temp-buffer
+                      (insert-file-contents file)
+                      (goto-char (point-min))
+                      (read (current-buffer)))
+                  (error
+                   (error "Corrupt plan file %s: %s" file (error-message-string err))))))
+      (unless (and (consp data)
+                   (plistp data)
+                   (equal (plist-get data :version) orgx-bulk-format-version)
+                   (stringp (plist-get data :id)))
+        (error "Corrupt plan file %s: invalid plan structure or version" file))
+      (let ((plan (orgx-bulk--plist-to-plan data)))
+        (setf (map-elt orgx-bulk--plans (orgx-bulk-plan-id plan)) plan)
+        plan))))
 
 (defun orgx-bulk-get-plan (id)
-  "Return the plan registered under ID, or nil."
-  (map-elt orgx-bulk--plans id))
+  "Return the plan registered or saved under ID, or nil."
+  (or (map-elt orgx-bulk--plans id)
+      (let ((file (and id orgx-bulk-directory (orgx-bulk-plan-file id))))
+        (when (and file (file-exists-p file))
+          (ignore-errors (orgx-bulk-load file))))))
 
-(defun orgx-bulk--item-at-point ()
-  "Return an `orgx-bulk-item' for the heading at point."
-  (orgx-bulk-item--create
-   :marker (point-marker)
-   :file (buffer-file-name (org-base-buffer (current-buffer)))
-   :heading (org-get-heading t t t t)
-   :from-state (org-get-todo-state)
-   :path (org-get-outline-path)))
-
-;;; Collection
-
-(cl-defun orgx-bulk-collect-files (&key files match from)
-  "Return items for todo headings in FILES.
-FILES is anything `org-map-entries' accepts (nil for the current buffer,
-`agenda', or a list of files).  MATCH is an optional `org-map-entries' match
-string.  FROM is a list of states to include; by default every not-done state."
-  ;; `org-map-entries' keeps nil results, so drop the non-matching headings.
-  (seq-keep #'identity
-            (org-map-entries
-             (lambda ()
-               (when-let* ((state (org-get-todo-state))
-                           ((if from
-                                (member state from)
-                              (not (member state org-done-keywords)))))
-                 (orgx-bulk--item-at-point)))
-             match files)))
-
-(defun orgx-bulk-collect-agenda ()
-  "Return items for marked entries in the current agenda, else all its todo lines."
-  (let ((markers (or (bound-and-true-p org-agenda-bulk-marked-entries)
-                     (let (acc)
-                       (save-excursion
-                         (goto-char (point-min))
-                         (while (not (eobp))
-                           (when-let* ((m (get-text-property (point) 'org-hd-marker)))
-                             (push m acc))
-                           (forward-line 1)))
-                       (nreverse acc)))))
-    (seq-keep (lambda (m)
-                (when (marker-buffer m)
-                  (org-with-point-at m
-                    (when (org-get-todo-state)
-                      (orgx-bulk--item-at-point)))))
-              markers)))
-
-;;; Planning
-
-(defun orgx-bulk-plan (target items &optional description)
-  "Create and register a plan moving ITEMS to TARGET state.
-Items that cannot take TARGET are deselected with a problem noted."
-  (let ((plan (orgx-bulk-plan--create
-               :id (format "bulk-%d" (setq orgx-bulk--counter (1+ orgx-bulk--counter)))
-               :target target :items items :description description)))
-    (seq-do-indexed
-     (lambda (item i)
-       (setf (orgx-bulk-item-id item) (1+ i))
-       (let ((problem (org-with-point-at (orgx-bulk-item-marker item)
-                        (cond
-                         ((not (member target org-todo-keywords-1))
-                          (format "%s is not a todo keyword in this file" target))
-                         ((equal target (orgx-bulk-item-from-state item))
-                          (format "already %s" target))))))
-         (when problem
-           (setf (orgx-bulk-item-problem item) problem
-                 (orgx-bulk-item-selected item) nil))))
-     items)
-    (setf (map-elt orgx-bulk--plans (orgx-bulk-plan-id plan)) plan)
-    plan))
-
-(defun orgx-bulk-plan-selected (plan)
-  "Return the items of PLAN that will be changed when applied."
-  (seq-filter (lambda (item)
-                (and (orgx-bulk-item-selected item)
-                     (not (orgx-bulk-item-problem item))
-                     (not (orgx-bulk-item-result item))))
-              (orgx-bulk-plan-items plan)))
-
-(defun orgx-bulk-plan-set-selection (plan ids)
-  "Select only the items of PLAN whose id is in IDS (nil to select none)."
-  (seq-do (lambda (item)
-            (setf (orgx-bulk-item-selected item)
-                  (and (memq (orgx-bulk-item-id item) ids) t)))
-          (orgx-bulk-plan-items plan)))
-
-;;; Applying
-
-(defun orgx-bulk--change-item (item plan)
-  "Move ITEM to PLAN's target state, recording the outcome on ITEM."
-  (let ((target (orgx-bulk-plan-target plan))
-        (org-inhibit-logging 'note))
-    (condition-case err
-        (org-with-point-at (orgx-bulk-item-marker item)
-          (org-todo target)
-          (if (equal (org-get-todo-state) target)
-              (progn
-                (setf (orgx-bulk-item-result item) 'changed)
-                (run-hook-with-args 'orgx-bulk-item-functions item plan))
-            (setf (orgx-bulk-item-result item) 'failed
-                  (orgx-bulk-item-problem item) "state unchanged (blocked?)")))
-      (error
-       (setf (orgx-bulk-item-result item) 'failed
-             (orgx-bulk-item-problem item) (error-message-string err))))))
-
-(defun orgx-bulk-apply (plan)
-  "Apply the selected items of PLAN and return PLAN.
-Never prompts.  Hooks run per item and then per file, and touched file buffers
-are saved when `orgx-bulk-save-buffers' is non-nil."
-  (unless (eq (orgx-bulk-plan-status plan) 'pending)
-    (user-error "Plan %s is already %s" (orgx-bulk-plan-id plan) (orgx-bulk-plan-status plan)))
-  (seq-do (lambda (item) (orgx-bulk--change-item item plan))
-          (orgx-bulk-plan-selected plan))
-  (let ((changed (seq-filter (lambda (item) (eq (orgx-bulk-item-result item) 'changed))
-                             (orgx-bulk-plan-items plan))))
-    (map-do
-     (lambda (file items)
-       (with-current-buffer (org-base-buffer (marker-buffer (orgx-bulk-item-marker (car items))))
-         (run-hook-with-args 'orgx-bulk-after-apply-functions file items plan)
-         (when (and orgx-bulk-save-buffers (buffer-modified-p))
-           (let ((inhibit-message t))
-             (save-buffer)))))
-     (seq-group-by #'orgx-bulk-item-file changed)))
-  (setf (orgx-bulk-plan-status plan) 'applied)
-  plan)
+(defun orgx-bulk-list-plans (&optional statuses)
+  "Return all saved and in-memory plans, filtered by STATUSES when non-nil."
+  (when (and orgx-bulk-directory (file-directory-p orgx-bulk-directory))
+    (dolist (file (directory-files orgx-bulk-directory t "\\`[^.].*\\.eld\\'"))
+      (unless (map-elt orgx-bulk--plans (file-name-base file))
+        (ignore-errors (orgx-bulk-load file)))))
+  (let ((all (hash-table-values orgx-bulk--plans)))
+    (if statuses
+        (seq-filter (lambda (p) (memq (orgx-bulk-plan-status p) statuses)) all)
+      all)))
 
 (defun orgx-bulk-discard (plan)
-  "Discard PLAN if still pending and kill its review buffer."
-  (when (eq (orgx-bulk-plan-status plan) 'pending)
-    (setf (orgx-bulk-plan-status plan) 'discarded))
-  (when-let* ((buf (get-buffer (orgx-bulk-review-buffer-name plan))))
-    (kill-buffer buf))
+  "Mark PLAN as `discarded', save it, and kill its plan buffer if open."
+  (setf (orgx-bulk-plan-status plan) 'discarded)
+  (orgx-bulk-save plan)
+  (when (fboundp 'orgx-bulk-plan-buffer-name)
+    (when-let* ((buf (get-buffer (orgx-bulk-plan-buffer-name plan))))
+      (kill-buffer buf)))
   plan)
+
+;;; Operation Registry and oab Bridge
+
+(defvar orgx-bulk--op-registry (make-hash-table :test #'eq)
+  "Hash table mapping operation symbol names to `orgx-bulk-op-spec' structs.")
+
+(defvar orgx-bulk--oab-owned-keys (make-hash-table :test #'eql)
+  "Hash table mapping custom action character keys to operation symbol names.")
+
+(defvar orgx-bulk--active-plan nil
+  "Dynamically bound `orgx-bulk-plan' during `orgx-bulk-execute'.")
+
+(defvar orgx-bulk--active-op nil
+  "Dynamically bound `orgx-bulk-op' during `orgx-bulk-execute'.")
+
+(defvar orgx-bulk--active-step-map nil
+  "Dynamically bound alist of (MARKER . STEP) during `orgx-bulk-execute'.")
+
+(defvar orgx-bulk--plain-oab-args nil
+  "Cached args for plain `org-agenda-bulk-action' runs outside a plan.")
+
+(defvar orgx-bulk--plain-oab-last-markers nil
+  "Tracks marker list in plain `org-agenda-bulk-action' runs.")
+
+(defun orgx-bulk--make-oab-wrapper (name)
+  "Return 0-arg callback for `org-agenda-bulk-custom-functions' for NAME."
+  (lambda ()
+    (if orgx-bulk--active-plan
+        (orgx-bulk--oab-step-callback)
+      (let* ((spec (orgx-bulk-get-op name))
+             (marker (or (org-get-at-bol 'org-hd-marker)
+                         (org-get-at-bol 'org-marker))))
+        (when (and spec marker (marker-buffer marker))
+          (unless (eq orgx-bulk--plain-oab-last-markers org-agenda-bulk-marked-entries)
+            (setq orgx-bulk--plain-oab-last-markers org-agenda-bulk-marked-entries)
+            (setq orgx-bulk--plain-oab-args
+                  (when-let* ((reader (orgx-bulk-op-spec-read-args spec)))
+                    (funcall reader))))
+          (org-with-point-at marker
+            (org-back-to-heading t)
+            (apply (orgx-bulk-op-spec-apply spec) orgx-bulk--plain-oab-args)))))))
+
+(cl-defun orgx-bulk-register-op
+    (name &key key label read-args apply describe from-json schema validate
+          queueable order-last builtin-oab)
+  "Register bulk operation NAME and bridge KEY into custom functions.
+LABEL, READ-ARGS, APPLY, DESCRIBE, FROM-JSON, SCHEMA, VALIDATE,
+QUEUEABLE, ORDER-LAST, and BUILTIN-OAB configure the `orgx-bulk-op-spec'."
+  (declare (indent 1))
+  (unless (symbolp name)
+    (user-error "Operation name must be a symbol: %S" name))
+  (when (and key (not builtin-oab))
+    (when (memq key orgx-bulk-oab-builtin-keys)
+      (error "Operation %s key `%c' collides with org-agenda-bulk-action built-in key"
+             name key))
+    (when-let* ((existing-owner (gethash key orgx-bulk--oab-owned-keys)))
+      (unless (eq existing-owner name)
+        (error "Operation %s key `%c' collides with existing operation %s"
+               name key existing-owner)))
+    (when-let* ((custom-entry (assoc key (bound-and-true-p org-agenda-bulk-custom-functions))))
+      (unless (eq (gethash key orgx-bulk--oab-owned-keys) name)
+        (error "Operation %s key `%c' collides with existing org-agenda-bulk-custom-functions entry"
+               name key))))
+  ;; Remove previous key binding for NAME if it changed.
+  (when-let* ((old (gethash name orgx-bulk--op-registry))
+              (old-key (orgx-bulk-op-spec-key old)))
+    (when (and (not (eql old-key key))
+               (eq (gethash old-key orgx-bulk--oab-owned-keys) name))
+      (remhash old-key orgx-bulk--oab-owned-keys)
+      (setq org-agenda-bulk-custom-functions
+            (assq-delete-all old-key org-agenda-bulk-custom-functions))))
+  (let ((spec (orgx-bulk-op-spec--create
+               :name name
+               :key key
+               :label (or label (symbol-name name))
+               :read-args read-args
+               :apply apply
+               :describe describe
+               :from-json from-json
+               :schema schema
+               :validate validate
+               :queueable queueable
+               :order-last order-last
+               :builtin-oab builtin-oab)))
+    (puthash name spec orgx-bulk--op-registry)
+    (when (and key (not builtin-oab) (not (memq key orgx-bulk-oab-builtin-keys)))
+      (puthash key name orgx-bulk--oab-owned-keys)
+      (let ((wrapper (orgx-bulk--make-oab-wrapper name)))
+        (setq org-agenda-bulk-custom-functions
+              (cons (list key wrapper)
+                    (assq-delete-all key org-agenda-bulk-custom-functions)))))
+    spec))
+
+(defun orgx-bulk-get-op (name)
+  "Return the `orgx-bulk-op-spec' registered under NAME, or nil."
+  (gethash (if (stringp name) (intern name) name) orgx-bulk--op-registry))
+
+(defun orgx-bulk-registered-ops ()
+  "Return all registered `orgx-bulk-op-spec' definitions."
+  (hash-table-values orgx-bulk--op-registry))
+
+(defun orgx-bulk-op-for-key (key)
+  "Return the `orgx-bulk-op-spec' for character KEY.
+Checks registered operations first, then bridges existing entries in
+`org-agenda-bulk-custom-functions' as `function' operations."
+  (or (seq-find (lambda (spec) (eql (orgx-bulk-op-spec-key spec) key))
+                (hash-table-values orgx-bulk--op-registry))
+      (when-let* ((entry (assoc key (bound-and-true-p org-agenda-bulk-custom-functions))))
+        (let ((fn (nth 1 entry))
+              (arg-fn (nth 2 entry)))
+          (orgx-bulk-op-spec--create
+           :name 'function
+           :key key
+           :label (format "Custom (%c)" key)
+           :read-args (lambda ()
+                        (if arg-fn
+                            (list fn (funcall arg-fn))
+                          (list fn)))
+           :apply (or (and (orgx-bulk-get-op 'function)
+                           (orgx-bulk-op-spec-apply (orgx-bulk-get-op 'function)))
+                      (lambda (f &optional f-args)
+                        (if f-args (apply f f-args) (funcall f))))
+           :describe (lambda (f &rest _) (format "fn %s" f)))))))
+
+(defun orgx-bulk-describe-op (op)
+  "Return a human-readable description string for `orgx-bulk-op' OP."
+  (let* ((name (if (orgx-bulk-op-p op) (orgx-bulk-op-name op) op))
+         (args (when (orgx-bulk-op-p op) (orgx-bulk-op-args op)))
+         (spec (orgx-bulk-get-op name)))
+    (if (and spec (orgx-bulk-op-spec-describe spec))
+        (condition-case nil
+            (apply (orgx-bulk-op-spec-describe spec) args)
+          (error (format "%s %S" name args)))
+      (if args
+          (format "%s %s" name (mapconcat (lambda (a) (format "%s" a)) args " "))
+        (format "%s" name)))))
+
+(defun orgx-bulk-order-ops (ops)
+  "Order OPS so operations with `:order-last' (e.g. refile, archive) come last."
+  (let (normal last)
+    (dolist (op ops)
+      (let* ((name (if (orgx-bulk-op-p op) (orgx-bulk-op-name op) op))
+             (spec (orgx-bulk-get-op name)))
+        (if (and spec (orgx-bulk-op-spec-order-last spec))
+            (push op last)
+          (push op normal))))
+    (append (nreverse normal) (nreverse last))))
+
+;;; Notes Policy Helper
+
+(defun orgx-bulk-inject-log-note (note-text &optional state from-state)
+  "Record NOTE-TEXT for STATE and FROM-STATE in the current heading's logbook.
+Uses `org-add-log-note', inserts NOTE-TEXT into `*Org Note*', and calls
+`org-store-log-note'."
+  (when (and note-text (not (string-empty-p note-text)))
+    (let ((org-inhibit-logging nil)
+          (org-log-setup nil))
+      (save-window-excursion
+        (org-add-log-setup 'state (or state (org-get-todo-state)) from-state 'note)
+        (remove-hook 'post-command-hook #'org-add-log-note)
+        (org-add-log-note)
+        (when-let* ((note-buf (get-buffer "*Org Note*")))
+          (with-current-buffer note-buf
+            (goto-char (point-max))
+            (insert note-text)
+            (org-store-log-note)))))))
+
+;;; Plan Construction
+
+(defun orgx-bulk--make-step-for-target (id target op)
+  "Build an `orgx-bulk-step' with ID for TARGET and OP, checking initial state."
+  (let* ((op-name (orgx-bulk-op-name op))
+         (op-args (orgx-bulk-op-args op))
+         (already-same (and (eq op-name 'todo-state)
+                            (plist-get target :todo-state)
+                            (equal (plist-get target :todo-state) (car op-args)))))
+    (orgx-bulk-step--create
+     :id id
+     :target target
+     :op op
+     :status (if already-same 'skipped 'pending)
+     :message (when already-same "already in target state"))))
+
+(cl-defun orgx-bulk-create-plan
+    (&key scope targets ops description (log-notes orgx-bulk-log-notes) note (status 'draft) save)
+  "Create an `orgx-bulk-plan' over SCOPE, TARGETS, and OPS.
+DESCRIPTION, LOG-NOTES, NOTE, and STATUS populate the plan metadata.
+When SAVE is non-nil (default t when `orgx-bulk-directory' is set), persists
+the plan to disk."
+  (let* ((id (orgx-bulk--next-id))
+         (norm-ops (orgx-bulk-order-ops
+                    (mapcar (lambda (o)
+                              (cond
+                               ((orgx-bulk-op-p o) o)
+                               ((and (consp o) (plistp o) (plist-get o :name))
+                                (orgx-bulk-op--create
+                                 :name (plist-get o :name)
+                                 :args (plist-get o :args)
+                                 :status (or (plist-get o :status) 'pending)))
+                               ((consp o)
+                                (orgx-bulk-op--create :name (car o) :args (cdr o)))
+                               ((symbolp o)
+                                (orgx-bulk-op--create :name o))
+                               (t (error "Invalid operation spec: %S" o))))
+                            ops)))
+         (step-id 0)
+         (steps
+          (seq-mapcat
+           (lambda (op)
+             (mapcar (lambda (target)
+                       (setq step-id (1+ step-id))
+                       (orgx-bulk--make-step-for-target step-id target op))
+                     targets))
+           norm-ops))
+         (plan (orgx-bulk-plan--create
+                :id id
+                :description description
+                :created (format-time-string "%Y-%m-%dT%H:%M:%S%z")
+                :status status
+                :scope scope
+                :log-notes log-notes
+                :note note
+                :ops norm-ops
+                :steps steps)))
+    (setf (map-elt orgx-bulk--plans id) plan)
+    (when (or save orgx-bulk-directory)
+      (orgx-bulk-save plan))
+    plan))
+
+(defun orgx-bulk-plan-add-op (plan op &optional targets)
+  "Add operation OP to PLAN for all unique targets in PLAN (or TARGETS).
+Re-orders pending operations so archive/refile run last, saves PLAN, and
+returns PLAN."
+  (let* ((op-struct (if (orgx-bulk-op-p op)
+                        op
+                      (orgx-bulk-op--create :name (car op) :args (cdr op))))
+         (existing-targets
+          (or targets
+              (seq-uniq (mapcar #'orgx-bulk-step-target (orgx-bulk-plan-steps plan))
+                        #'equal)))
+         (max-id (apply #'max 0 (mapcar #'orgx-bulk-step-id (orgx-bulk-plan-steps plan))))
+         (new-steps
+          (mapcar (lambda (target)
+                    (setq max-id (1+ max-id))
+                    (orgx-bulk--make-step-for-target max-id target op-struct))
+                  existing-targets))
+         (all-ops (orgx-bulk-order-ops (append (orgx-bulk-plan-ops plan) (list op-struct))))
+         (all-steps (append (orgx-bulk-plan-steps plan) new-steps)))
+    (setf (orgx-bulk-plan-ops plan) all-ops)
+    ;; Keep steps ordered by their operation's position in `all-ops'.
+    (setf (orgx-bulk-plan-steps plan)
+          (seq-mapcat (lambda (o)
+                        (seq-filter (lambda (s) (eq (orgx-bulk-step-op s) o))
+                                    all-steps))
+                      all-ops))
+    (orgx-bulk-save plan)))
+
+;;; Executor (`org-agenda-bulk-action' driver)
+
+(defconst orgx-bulk--exec-dispatch-key ?\x1e
+  "Internal custom-function key used by `orgx-bulk-execute' to drive oab.")
+
+(defun orgx-bulk--oab-step-callback ()
+  "Per-entry callback invoked by `org-agenda-bulk-action' at each agenda line."
+  (let* ((marker (or (org-get-at-bol 'org-hd-marker)
+                     (org-get-at-bol 'org-marker)))
+         (pair (or (assq marker orgx-bulk--active-step-map)
+                   (seq-find (lambda (cell) (equal (car cell) marker))
+                             orgx-bulk--active-step-map)))
+         (step (cdr pair))
+         (plan orgx-bulk--active-plan)
+         (op orgx-bulk--active-op)
+         (spec (and op (orgx-bulk-get-op (orgx-bulk-op-name op)))))
+    (when (and step (eq (orgx-bulk-step-status step) 'pending))
+      (if (not (and marker (marker-buffer marker) (buffer-live-p (marker-buffer marker))))
+          (setf (orgx-bulk-step-status step) 'missing
+                (orgx-bulk-step-message step) "Target buffer no longer live")
+        (if (not spec)
+            (setf (orgx-bulk-step-status step) 'failed
+                  (orgx-bulk-step-message step)
+                  (format "Unknown operation: %s" (and op (orgx-bulk-op-name op))))
+          ;; Prompt for per-step note before entering condition-case so `C-g'
+          ;; during `read-string' is caught by the outer quit handler.
+          (when (and (eq (orgx-bulk-op-name op) 'todo-state)
+                     (eq (orgx-bulk-plan-log-notes plan) 'each)
+                     (null (orgx-bulk-step-note step)))
+            (let ((heading (plist-get (orgx-bulk-step-target step) :heading)))
+              (setf (orgx-bulk-step-note step)
+                    (read-string (format "Note for %s: " (or heading "heading"))))))
+          (condition-case err
+              (org-with-point-at marker
+                (save-restriction
+                  (widen)
+                  (org-back-to-heading t)
+                  (when-let* ((validate (orgx-bulk-op-spec-validate spec))
+                              (problem (apply validate (orgx-bulk-op-args op))))
+                    (error "%s" problem))
+                  (let ((heading (org-get-heading t t t t)))
+                    (apply (orgx-bulk-op-spec-apply spec) (orgx-bulk-op-args op))
+                    (setf (orgx-bulk-step-status step) 'done
+                          (orgx-bulk-step-message step) nil)
+                    ;; Refresh the target snapshot only while this heading is
+                    ;; still here; refile and archive leave point on a neighbor.
+                    (when (and (ignore-errors (org-back-to-heading t))
+                               (equal (org-get-heading t t t t) heading))
+                      (setf (orgx-bulk-step-target step)
+                            (orgx-bulk--target-at-heading))))
+                  (run-hook-with-args 'orgx-bulk-step-functions step plan)))
+            (error
+             (setf (orgx-bulk-step-status step) 'failed
+                   (orgx-bulk-step-message step) (error-message-string err)))))))))
+
+(defun orgx-bulk--run-after-apply-hooks (plan)
+  "Run `orgx-bulk-after-apply-functions' and save touched files for PLAN."
+  (let ((done-steps (seq-filter (lambda (s) (eq (orgx-bulk-step-status s) 'done))
+                                (orgx-bulk-plan-steps plan))))
+    (map-do
+     (lambda (file steps)
+       (when (and file (file-exists-p file))
+         (with-current-buffer (find-file-noselect file)
+           (run-hook-with-args 'orgx-bulk-after-apply-functions file steps plan)
+           (when (and orgx-bulk-save-buffers (buffer-modified-p))
+             (let ((inhibit-message t))
+               (save-buffer))))))
+     (seq-group-by (lambda (s) (plist-get (orgx-bulk-step-target s) :file))
+                   done-steps))))
+
+(defun orgx-bulk--ensure-minimal-agenda (markers &optional buf-name)
+  "Create or update `org-agenda-mode' buffer BUF-NAME holding MARKERS."
+  (let ((buf (get-buffer-create (or buf-name "*Org Agenda(orgx-bulk)*"))))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+        (unless (derived-mode-p 'org-agenda-mode)
+          (org-agenda-mode))
+        ;; Ensure every marker has an agenda line with `eq' `org-hd-marker'.
+        (dolist (m markers)
+          (unless (text-property-any (point-min) (point-max) 'org-hd-marker m)
+            (goto-char (point-max))
+            (let ((start (point))
+                  (heading (if (and (markerp m) (marker-buffer m))
+                               (org-with-point-at m (org-get-heading t t t t))
+                             "entry")))
+              (insert (format "  bulk:        %s\n" heading))
+              (add-text-properties start (1- (point))
+                                   (list 'org-hd-marker m
+                                         'org-marker m
+                                         'todo-state (and (marker-buffer m)
+                                                          (org-with-point-at m
+                                                            (org-get-todo-state))))))))))
+    buf))
+
+(defun orgx-bulk-execute (plan &optional only-op)
+  "Execute pending steps of PLAN (or ONLY-OP) through `org-agenda-bulk-action'.
+Skips `done' and `skipped' steps.  Catches `quit', marks the plan `paused',
+and saves.  Saves PLAN after each operation completes and runs
+`orgx-bulk-step-functions' and `orgx-bulk-after-apply-functions'."
+  (require 'orgx-bulk-ops nil t)
+  (require 'orgx-bulk-agenda nil t)
+  (when (eq (orgx-bulk-plan-status plan) 'discarded)
+    (user-error "Plan %s is discarded" (orgx-bulk-plan-id plan)))
+  (when (eq (orgx-bulk-plan-status plan) 'complete)
+    (user-error "Plan %s is already complete" (orgx-bulk-plan-id plan)))
+  ;; When `log-notes' is `one' and no note is recorded yet, read it once if interactive.
+  (when (and (eq (orgx-bulk-plan-log-notes plan) 'one)
+             (null (orgx-bulk-plan-note plan))
+             (seq-some (lambda (op) (eq (orgx-bulk-op-name op) 'todo-state))
+                       (orgx-bulk-plan-ops plan))
+             (not noninteractive))
+    (setf (orgx-bulk-plan-note plan) (read-string "Log note for plan: ")))
+  (setf (orgx-bulk-plan-status plan) 'running)
+  (orgx-bulk-save plan)
+  (let ((ops-to-run (if only-op
+                        (list only-op)
+                      (orgx-bulk-order-ops (orgx-bulk-plan-ops plan))))
+        (quitted nil)
+        (orgx-bulk--internal-marking t))
+    (condition-case nil
+        (dolist (op ops-to-run)
+          (let* ((op-steps (seq-filter (lambda (s)
+                                         (and (eq (orgx-bulk-step-op s) op)
+                                              (eq (orgx-bulk-step-status s) 'pending)))
+                                       (orgx-bulk-plan-steps plan)))
+                 (spec (orgx-bulk-get-op (orgx-bulk-op-name op)))
+                 (step-map nil)
+                 (resolved-markers nil))
+            (when op-steps
+              (if (not spec)
+                  (dolist (s op-steps)
+                    (setf (orgx-bulk-step-status s) 'failed
+                          (orgx-bulk-step-message s)
+                          (format "Unknown operation: %s" (orgx-bulk-op-name op))))
+                ;; Resolve each pending step's target before driving oab.
+                (dolist (s op-steps)
+                  (let ((m (orgx-bulk--resolve-target (orgx-bulk-step-target s))))
+                    (if (not m)
+                        (setf (orgx-bulk-step-status s) 'missing
+                              (orgx-bulk-step-message s) "Target heading not found")
+                      (push (cons m s) step-map)
+                      (push m resolved-markers))))
+                (setq step-map (nreverse step-map)
+                      resolved-markers (nreverse resolved-markers))
+                (when resolved-markers
+                  (let* ((agenda-pair
+                          (if (fboundp 'orgx-bulk-batch-ensure-agenda)
+                              (orgx-bulk-batch-ensure-agenda plan resolved-markers)
+                            (cons (orgx-bulk--ensure-minimal-agenda
+                                   resolved-markers
+                                   (plist-get (orgx-bulk-plan-scope plan) :buffer-name))
+                                  resolved-markers)))
+                         (agenda-buf (car agenda-pair))
+                         (batch-markers (cdr agenda-pair))
+                         ;; Remap step-map keys to the exact `eq' markers in agenda-buf.
+                         (mapped-step-map
+                          (cl-mapcar (lambda (bm cell) (cons bm (cdr cell)))
+                                     batch-markers step-map))
+                         (dispatch-key
+                          (if (and (orgx-bulk-op-spec-key spec)
+                                   (not (orgx-bulk-op-spec-builtin-oab spec))
+                                   (not (memq (orgx-bulk-op-spec-key spec)
+                                              orgx-bulk-oab-builtin-keys)))
+                              (orgx-bulk-op-spec-key spec)
+                            orgx-bulk--exec-dispatch-key))
+                         (orgx-bulk--active-plan plan)
+                         (orgx-bulk--active-op op)
+                         (orgx-bulk--active-step-map mapped-step-map))
+                    (with-current-buffer agenda-buf
+                      (let ((org-agenda-bulk-marked-entries (copy-sequence batch-markers))
+                            (org-agenda-persistent-marks nil)
+                            (org-agenda-bulk-custom-functions
+                             (cons (list dispatch-key (orgx-bulk--make-oab-wrapper
+                                                       (orgx-bulk-op-name op)))
+                                   (assq-delete-all dispatch-key org-agenda-bulk-custom-functions)))
+                            (unread-command-events (list dispatch-key)))
+                        ;; Suppress `org-agenda-redo' inside oab if the buffer has no
+                        ;; `org-agenda-redo-command' or while more operations remain.
+                        (cl-letf (((symbol-function 'org-agenda-redo)
+                                   (if (and (bound-and-true-p org-agenda-redo-command)
+                                            (eq op (car (last ops-to-run))))
+                                       (symbol-function 'org-agenda-redo)
+                                     #'ignore)))
+                          (org-agenda-bulk-action))))
+                    ;; Any step still `pending' after oab was skipped by oab (e.g.
+                    ;; entry disappeared from the agenda buffer after a mid-run redo).
+                    (dolist (cell mapped-step-map)
+                      (let ((st (cdr cell)))
+                        (when (eq (orgx-bulk-step-status st) 'pending)
+                          (setf (orgx-bulk-step-status st) 'skipped
+                                (orgx-bulk-step-message st)
+                                "Skipped by org-agenda-bulk-action (entry disappeared)")))))))
+              (setf (orgx-bulk-op-status op)
+                    (if (seq-some (lambda (s)
+                                    (and (eq (orgx-bulk-step-op s) op)
+                                         (eq (orgx-bulk-step-status s) 'pending)))
+                                  (orgx-bulk-plan-steps plan))
+                        'paused
+                      'done))
+              (orgx-bulk-save plan))))
+      (quit
+       (setq quitted t)
+       (setf (orgx-bulk-plan-status plan) 'paused)
+       (orgx-bulk-save plan)))
+    (orgx-bulk--run-after-apply-hooks plan)
+    (unless quitted
+      (setf (orgx-bulk-plan-status plan)
+            (if (seq-some (lambda (s) (eq (orgx-bulk-step-status s) 'pending))
+                          (orgx-bulk-plan-steps plan))
+                'paused
+              'complete))
+      (orgx-bulk-save plan))
+    plan))
+
+;;; JSON Summary (for MCP)
 
 (defun orgx-bulk-plan-summary (plan)
   "Return PLAN as a JSON-ready plist."
-  (let ((items (orgx-bulk-plan-items plan)))
+  (let ((steps (orgx-bulk-plan-steps plan))
+        (ops (orgx-bulk-plan-ops plan)))
     (list :plan_id (orgx-bulk-plan-id plan)
+          :description (or (orgx-bulk-plan-description plan) :null)
+          :created (or (orgx-bulk-plan-created plan) :null)
           :status (symbol-name (orgx-bulk-plan-status plan))
-          :target_state (orgx-bulk-plan-target plan)
-          :selected (length (seq-filter #'orgx-bulk-item-selected items))
-          :items (vconcat
-                  (seq-map
-                   (lambda (item)
-                     (list :id (orgx-bulk-item-id item)
-                           :file (or (orgx-bulk-item-file item) :null)
-                           :heading (orgx-bulk-item-heading item)
-                           :path (vconcat (orgx-bulk-item-path item))
-                           :from_state (orgx-bulk-item-from-state item)
-                           :selected (if (orgx-bulk-item-selected item) t :json-false)
-                           :result (if-let* ((r (orgx-bulk-item-result item)))
-                                       (symbol-name r)
-                                     :null)
-                           :problem (or (orgx-bulk-item-problem item) :null)))
-                   items)))))
+          :log_notes (symbol-name (or (orgx-bulk-plan-log-notes plan) 'ignore))
+          :note (or (orgx-bulk-plan-note plan) :null)
+          :ops (vconcat
+                (mapcar (lambda (op)
+                          (list :name (symbol-name (orgx-bulk-op-name op))
+                                :args (vconcat (orgx-bulk-op-args op))
+                                :description (orgx-bulk-describe-op op)
+                                :status (symbol-name (orgx-bulk-op-status op))))
+                        ops))
+          :steps (vconcat
+                  (mapcar (lambda (step)
+                            (let ((tgt (orgx-bulk-step-target step)))
+                              (list :id (orgx-bulk-step-id step)
+                                    :op (symbol-name (orgx-bulk-step-op-name step))
+                                    :args (vconcat (orgx-bulk-step-op-args step))
+                                    :file (or (plist-get tgt :file) :null)
+                                    :heading (or (plist-get tgt :heading) :null)
+                                    :path (vconcat (plist-get tgt :outline-path))
+                                    :status (symbol-name (orgx-bulk-step-status step))
+                                    :message (or (orgx-bulk-step-message step) :null)
+                                    :note (or (orgx-bulk-step-note step) :null))))
+                          steps)))))
 
-;;; Denote plan integration
+;;; Denote Plan Integration
 
-(defun orgx-bulk-denote-sync-execution-status (file _items _plan)
+(defun orgx-bulk-denote-sync-execution-status (file _steps _plan)
   "Sync `#+execution_status:' of denote plan FILE with its open tasks.
 Becomes `complete' when no open todo remains, else `in-progress'.  Only an
 existing keyword line is rewritten; the current buffer must visit FILE."
@@ -241,7 +914,6 @@ existing keyword line is rewritten; the current buffer must visit FILE."
     (save-excursion
       (save-restriction
         (widen)
-        ;; Compute first: `org-map-entries' clobbers the match data.
         (let ((new (if (seq-some #'identity
                                  (org-map-entries
                                   (lambda ()
@@ -254,182 +926,33 @@ existing keyword line is rewritten; the current buffer must visit FILE."
                      (not (equal (match-string 1) new)))
             (replace-match new t t nil 1)))))))
 
-;;; Review buffer
-
-(defvar-local orgx-bulk--review-plan nil
-  "The `orgx-bulk-plan' shown in this review buffer.")
-
-(defvar-keymap orgx-bulk-review-mode-map
-  :doc "Keymap for `orgx-bulk-review-mode'."
-  "x" #'orgx-bulk-review-toggle
-  "a" #'orgx-bulk-review-select-all
-  "u" #'orgx-bulk-review-select-none
-  "c" #'orgx-bulk-review-confirm
-  "RET" #'orgx-bulk-review-visit
-  "g" #'orgx-bulk-review-refresh
-  "q" #'orgx-bulk-review-quit)
-
-(define-derived-mode orgx-bulk-review-mode special-mode "OrgBulk"
-  "Review and confirm a bulk task state change.
-\\{orgx-bulk-review-mode-map}"
-  (setq-local truncate-lines t))
-
-(defun orgx-bulk-review-buffer-name (plan)
-  "Return the review buffer name for PLAN."
-  (format "*orgx-bulk: %s*" (orgx-bulk-plan-id plan)))
-
-(defun orgx-bulk-review-render ()
-  "Redraw the current review buffer from its plan."
-  (let* ((plan orgx-bulk--review-plan)
-         (items (orgx-bulk-plan-items plan))
-         (line (line-number-at-pos))
-         (inhibit-read-only t))
-    (erase-buffer)
-    (insert (format "Bulk change %s: -> %s   [%s]\n"
-                    (orgx-bulk-plan-id plan)
-                    (orgx-bulk-plan-target plan)
-                    (orgx-bulk-plan-status plan)))
-    (when-let* ((d (orgx-bulk-plan-description plan)))
-      (insert d "\n"))
-    (insert (format "%d of %d selected.  x toggle, a all, u none, c confirm, RET visit, q quit\n\n"
-                    (length (seq-filter #'orgx-bulk-item-selected items))
-                    (length items)))
-    (seq-do
-     (lambda (item)
-       (let ((start (point)))
-         (insert (format "[%s] %-12s -> %-10s %s  (%s%s)%s\n"
-                         (cond
-                          ((eq (orgx-bulk-item-result item) 'changed) "✓")
-                          ((orgx-bulk-item-result item) "!")
-                          ((orgx-bulk-item-selected item) "x")
-                          (t " "))
-                         (orgx-bulk-item-from-state item)
-                         (orgx-bulk-plan-target plan)
-                         (orgx-bulk-item-heading item)
-                         (file-name-nondirectory (or (orgx-bulk-item-file item) "?"))
-                         (if-let* ((p (orgx-bulk-item-path item)))
-                             (concat " :: " (string-join p "/"))
-                           "")
-                         (if-let* ((p (orgx-bulk-item-problem item)))
-                             (concat "  -- " p)
-                           "")))
-         (put-text-property start (point) 'orgx-bulk-item item)))
-     items)
-    (goto-char (point-min))
-    (forward-line (1- line))))
-
-(defun orgx-bulk--review-item ()
-  "Return the item on the current line, or signal a user error."
-  (or (get-text-property (line-beginning-position) 'orgx-bulk-item)
-      (user-error "No item on this line")))
-
-(defun orgx-bulk--review-pending ()
-  "Signal a user error unless the current review's plan is still pending."
-  (unless (eq (orgx-bulk-plan-status orgx-bulk--review-plan) 'pending)
-    (user-error "Plan already %s" (orgx-bulk-plan-status orgx-bulk--review-plan))))
-
-(defun orgx-bulk-review-toggle ()
-  "Toggle selection of the item on this line."
-  (interactive)
-  (orgx-bulk--review-pending)
-  (let ((item (orgx-bulk--review-item)))
-    (when (orgx-bulk-item-problem item)
-      (user-error "Cannot select: %s" (orgx-bulk-item-problem item)))
-    (setf (orgx-bulk-item-selected item) (not (orgx-bulk-item-selected item)))
-    (orgx-bulk-review-render)))
-
-(defun orgx-bulk-review-select-all ()
-  "Select every item that can be changed."
-  (interactive)
-  (orgx-bulk--review-pending)
-  (seq-do (lambda (item)
-            (setf (orgx-bulk-item-selected item) (not (orgx-bulk-item-problem item))))
-          (orgx-bulk-plan-items orgx-bulk--review-plan))
-  (orgx-bulk-review-render))
-
-(defun orgx-bulk-review-select-none ()
-  "Deselect every item."
-  (interactive)
-  (orgx-bulk--review-pending)
-  (orgx-bulk-plan-set-selection orgx-bulk--review-plan nil)
-  (orgx-bulk-review-render))
-
-(defun orgx-bulk-review-refresh ()
-  "Redraw the review buffer."
-  (interactive)
-  (orgx-bulk-review-render))
-
-(defun orgx-bulk-review-visit ()
-  "Visit the heading of the item on this line."
-  (interactive)
-  (let ((marker (orgx-bulk-item-marker (orgx-bulk--review-item))))
-    (pop-to-buffer (marker-buffer marker))
-    (widen)
-    (goto-char marker)
-    (org-fold-show-context)))
-
-(defun orgx-bulk-review-confirm ()
-  "Apply the selected changes of the plan in this buffer."
-  (interactive)
-  (orgx-bulk--review-pending)
-  (let ((n (length (orgx-bulk-plan-selected orgx-bulk--review-plan))))
-    (when (zerop n)
-      (user-error "Nothing selected"))
-    (orgx-bulk-apply orgx-bulk--review-plan)
-    (orgx-bulk-review-render)
-    (message "Changed %d heading(s)" n)))
-
-(defun orgx-bulk-review-quit ()
-  "Discard a pending plan and close the review buffer."
-  (interactive)
-  (let ((plan orgx-bulk--review-plan))
-    (quit-window t)
-    (orgx-bulk-discard plan)))
-
-(defun orgx-bulk-review (plan &optional select)
-  "Show PLAN in its review buffer and return the buffer.
-With SELECT, also select the window; otherwise only display it."
-  (let ((buf (get-buffer-create (orgx-bulk-review-buffer-name plan))))
-    (with-current-buffer buf
-      (orgx-bulk-review-mode)
-      (setq orgx-bulk--review-plan plan)
-      (orgx-bulk-review-render))
-    (if select
-        (pop-to-buffer buf)
-      (display-buffer buf))
-    buf))
-
-;;; Interactive entry point
-
-(defun orgx-bulk--read-scope ()
-  "Return (ITEMS . DESCRIPTION) for the scope chosen by the user."
-  (let ((scope (if (derived-mode-p 'org-agenda-mode)
-                   "agenda"
-                 (completing-read "Scope: "
-                                  '("buffer" "agenda-files" "denote")
-                                  nil t nil nil "buffer")))
-        (match (let ((m (read-string "Match (tags/props, empty for all): ")))
-                 (unless (string-empty-p m) m))))
-    (pcase scope
-      ("agenda" (cons (orgx-bulk-collect-agenda) "Agenda entries"))
-      ("buffer" (cons (orgx-bulk-collect-files :match match) (format "Buffer %s" (buffer-name))))
-      ("agenda-files" (cons (orgx-bulk-collect-files :files 'agenda :match match) "Agenda files"))
-      ("denote" (cons (orgx-bulk-collect-files :files (orgx-denote-files) :match match)
-                      "Denote files")))))
+;;; Interactive Entry Point (`C-c o b')
 
 ;;;###autoload
 (defun orgx-bulk-todo-state (state)
-  "Move many tasks to STATE after reviewing them in a buffer.
+  "Create a bulk plan moving headings to STATE and open its plan buffer.
 Scope is the agenda's marked (or all) entries when called from an agenda,
 otherwise the current buffer, the agenda files, or the denote files."
   (interactive
    (list (completing-read "Move to state: "
                           (seq-uniq (append org-todo-keywords-1 org-done-keywords))
                           nil nil)))
-  (pcase-let ((`(,items . ,desc) (orgx-bulk--read-scope)))
-    (unless items
+  (require 'orgx-bulk-ops)
+  (require 'orgx-bulk-agenda)
+  (require 'orgx-bulk-buffer)
+  (pcase-let ((`(,scope ,targets ,desc) (orgx-bulk-batch-read-scope)))
+    (unless targets
       (user-error "No matching tasks"))
-    (orgx-bulk-review (orgx-bulk-plan state items desc) t)))
+    (let* ((note (when (eq orgx-bulk-log-notes 'one)
+                   (read-string (format "Log note for -> %s: " state))))
+           (plan (orgx-bulk-create-plan
+                  :scope scope
+                  :targets targets
+                  :ops (list (orgx-bulk-op--create :name 'todo-state :args (list state)))
+                  :description desc
+                  :log-notes orgx-bulk-log-notes
+                  :note note)))
+      (orgx-bulk-review plan t))))
 
 (provide 'orgx-bulk)
 ;;; orgx-bulk.el ends here
