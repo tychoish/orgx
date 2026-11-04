@@ -4,6 +4,7 @@
 
 (require 'ert)
 (require 'org)
+(require 'org-capture)
 (require 'orgx-capture-shell)
 
 (ert-deftest orgx-capture-shell-target-resolution-test ()
@@ -540,6 +541,179 @@
             (delete-process proc))))
       (should (equal (orgx-capture-shell-test--contents file)
                      "* Tasks\n** TODO int x = 1;\n")))))
+
+
+;;; Prepend and Archive handling
+
+(defun orgx-capture-shell-test--ins (content headline prepend &optional entry)
+  "Insert ENTRY under HEADLINE in a file holding CONTENT; return the result."
+  (orgx-capture-shell-test--with-file content
+    (orgx-capture-shell--insert-entry file headline (or entry "* TODO new") prepend)
+    (orgx-capture-shell-test--contents file)))
+
+(ert-deftest orgx-capture-shell-prepend-default-test ()
+  (should (eq (default-value 'orgx-capture-shell-prepend) 'follow)))
+
+(ert-deftest orgx-capture-shell-prepend-before-first-child-test ()
+  (should (equal (orgx-capture-shell-test--ins "* Tasks\nbody\n** a\n** b\n* Other\n" "Tasks" t)
+                 "* Tasks\nbody\n** TODO new\n** a\n** b\n* Other\n")))
+
+(ert-deftest orgx-capture-shell-prepend-no-children-test ()
+  (should (equal (orgx-capture-shell-test--ins "* Tasks\nbody\n* Other\n" "Tasks" t)
+                 "* Tasks\nbody\n** TODO new\n* Other\n"))
+  (should (equal (orgx-capture-shell-test--ins "* Tasks\nbody" "Tasks" t)
+                 "* Tasks\nbody\n** TODO new\n")))
+
+(ert-deftest orgx-capture-shell-prepend-never-after-archive-test ()
+  (should (equal (orgx-capture-shell-test--ins
+                  "* Tasks\n** a\n** Archive :ARCHIVE:\n*** old\n" "Tasks" t)
+                 "* Tasks\n** TODO new\n** a\n** Archive :ARCHIVE:\n*** old\n")))
+
+(ert-deftest orgx-capture-shell-prepend-only-archive-child-test ()
+  (should (equal (orgx-capture-shell-test--ins
+                  "* Tasks\n** Archive :ARCHIVE:\n*** old\n" "Tasks" t)
+                 "* Tasks\n** TODO new\n** Archive :ARCHIVE:\n*** old\n")))
+
+(ert-deftest orgx-capture-shell-prepend-top-level-test ()
+  (should (equal (orgx-capture-shell-test--ins "#+title: x\n\n* A\n* B\n" nil t "** TODO new")
+                 "#+title: x\n\n* TODO new\n* A\n* B\n"))
+  (should (equal (orgx-capture-shell-test--ins "#+title: x\n" nil t)
+                 "#+title: x\n* TODO new\n")))
+
+(ert-deftest orgx-capture-shell-prepend-order-newest-first-test ()
+  (orgx-capture-shell-test--with-file "* Tasks\n** old\n"
+    (orgx-capture-shell--insert-entry file "Tasks" "* TODO one" t)
+    (orgx-capture-shell--insert-entry file "Tasks" "* TODO two" t)
+    (should (equal (orgx-capture-shell-test--contents file)
+                   "* Tasks\n** TODO two\n** TODO one\n** old\n"))))
+
+(ert-deftest orgx-capture-shell-prepend-nested-path-test ()
+  (should (equal (orgx-capture-shell-test--ins "* P\n** Tasks\n*** a\n* Q\n" "P/Tasks" t)
+                 "* P\n** Tasks\n*** TODO new\n*** a\n* Q\n")))
+
+(ert-deftest orgx-capture-shell-prepend-created-path-test ()
+  (should (equal (orgx-capture-shell-test--ins "* A\n" "A/New" t)
+                 "* A\n** New\n*** TODO new\n")))
+
+(ert-deftest orgx-capture-shell-prepend-undo-test ()
+  (orgx-capture-shell-test--with-file "* Tasks\n** a\n"
+    (orgx-capture-shell--insert-entry file "Tasks" "* TODO x" t)
+    (orgx-capture-shell--undo-last)
+    (should (equal (orgx-capture-shell-test--contents file) "* Tasks\n** a\n"))))
+
+(ert-deftest orgx-capture-shell-append-before-trailing-archive-test ()
+  (should (equal (orgx-capture-shell-test--ins
+                  "* Tasks\n** a\n** Archive :ARCHIVE:\n*** old\n" "Tasks" nil)
+                 "* Tasks\n** a\n** TODO new\n** Archive :ARCHIVE:\n*** old\n")))
+
+(ert-deftest orgx-capture-shell-append-before-multiple-trailing-archives-test ()
+  (should (equal (orgx-capture-shell-test--ins
+                  "* T\n** a\n** A1 :ARCHIVE:\n** A2 :ARCHIVE:\n" "T" nil)
+                 "* T\n** a\n** TODO new\n** A1 :ARCHIVE:\n** A2 :ARCHIVE:\n")))
+
+(ert-deftest orgx-capture-shell-append-archive-in-middle-not-skipped-test ()
+  (should (equal (orgx-capture-shell-test--ins
+                  "* T\n** A :ARCHIVE:\n** b\n" "T" nil)
+                 "* T\n** A :ARCHIVE:\n** b\n** TODO new\n")))
+
+(ert-deftest orgx-capture-shell-append-only-archive-test ()
+  (should (equal (orgx-capture-shell-test--ins "* T\n** A :ARCHIVE:\n" "T" nil)
+                 "* T\n** TODO new\n** A :ARCHIVE:\n")))
+
+(ert-deftest orgx-capture-shell-append-deep-archive-not-direct-child-test ()
+  "Only direct children are considered; a deeper tagged heading doesn't move the entry."
+  (should (equal (orgx-capture-shell-test--ins "* T\n** a\n*** x :ARCHIVE:\n" "T" nil)
+                 "* T\n** a\n*** x :ARCHIVE:\n** TODO new\n")))
+
+(ert-deftest orgx-capture-shell-append-top-level-archive-test ()
+  (should (equal (orgx-capture-shell-test--ins "* A\n* Archive :ARCHIVE:\n" nil nil)
+                 "* A\n* TODO new\n* Archive :ARCHIVE:\n")))
+
+(ert-deftest orgx-capture-shell-append-custom-archive-tag-test ()
+  (let ((org-archive-tag "OLD"))
+    (should (equal (orgx-capture-shell-test--ins "* T\n** a\n** Z :OLD:\n" "T" nil)
+                   "* T\n** a\n** TODO new\n** Z :OLD:\n"))))
+
+
+;;; Placement follows the capture template
+
+(defun orgx-capture-shell-test--tpl (kind path prepend &optional headline)
+  "Return a flat capture template of KIND (a description word) for PATH."
+  (list "xx" (format "%s (proj; q)" kind) 'entry (list (quote file+headline) path (or headline "Tasks"))
+        "* %?" :prepend prepend))
+
+(ert-deftest orgx-capture-shell-resolve-prepend-builtin-defaults-test ()
+  (let ((orgx-capture-shell-prepend 'follow) (org-capture-templates nil))
+    (should (eq (orgx-capture-shell--resolve-prepend 'task) t))
+    (should (eq (orgx-capture-shell--resolve-prepend 'note) t))
+    (should (eq (orgx-capture-shell--resolve-prepend 'journal) nil))
+    (should (eq (orgx-capture-shell--resolve-prepend 'plain) t))))
+
+(ert-deftest orgx-capture-shell-resolve-prepend-forced-test ()
+  (let ((org-capture-templates (list (orgx-capture-shell-test--tpl "tasks" "/tmp/a.org" nil))))
+    (let ((orgx-capture-shell-prepend t))
+      (should (eq (orgx-capture-shell--resolve-prepend 'journal) t))
+      (should (eq (orgx-capture-shell--resolve-prepend 'task "/tmp/a.org") t)))
+    (let ((orgx-capture-shell-prepend nil))
+      (should (eq (orgx-capture-shell--resolve-prepend 'task) nil)))))
+
+(ert-deftest orgx-capture-shell-resolve-prepend-follows-template-test ()
+  (let ((orgx-capture-shell-prepend 'follow)
+        (org-capture-templates
+         (list (orgx-capture-shell-test--tpl "tasks" "/tmp/a.org" nil)
+               (orgx-capture-shell-test--tpl "journal" "/tmp/a.org" t))))
+    (should (eq (orgx-capture-shell--resolve-prepend 'task) nil))
+    (should (eq (orgx-capture-shell--resolve-prepend 'journal) t))
+    ;; no note template: builtin default
+    (should (eq (orgx-capture-shell--resolve-prepend 'note) t))))
+
+(ert-deftest orgx-capture-shell-resolve-prepend-prefers-same-file-test ()
+  (let ((orgx-capture-shell-prepend 'follow)
+        (org-capture-templates
+         (list (orgx-capture-shell-test--tpl "tasks" "/tmp/a.org" nil)
+               (orgx-capture-shell-test--tpl "tasks" "/tmp/b.org" t))))
+    (should (eq (orgx-capture-shell--resolve-prepend 'task "/tmp/b.org") t))
+    (should (eq (orgx-capture-shell--resolve-prepend 'task "/tmp/a.org") nil))
+    ;; unknown file: first template of that kind
+    (should (eq (orgx-capture-shell--resolve-prepend 'task "/tmp/zzz.org") nil))))
+
+(ert-deftest orgx-capture-shell-resolve-prepend-relative-path-test ()
+  (let ((orgx-capture-shell-prepend 'follow)
+        (org-directory "/tmp/orgdir")
+        (org-capture-templates
+         (list (orgx-capture-shell-test--tpl "tasks" "x.org" nil)
+               (orgx-capture-shell-test--tpl "tasks" "y.org" t))))
+    (should (eq (orgx-capture-shell--resolve-prepend 'task "/tmp/orgdir/y.org") t))))
+
+(ert-deftest orgx-capture-shell-resolve-prepend-ignores-non-flat-entries-test ()
+  "Group entries and templates without :prepend don't confuse the lookup."
+  (let ((orgx-capture-shell-prepend 'follow)
+        (org-capture-templates
+         (list '("x" "tasks group")
+               (list "xt" "tasks (p; q)" 'entry '(file "/tmp/a.org") "* %?"))))
+    ;; the :prepend-less template means org's default: append
+    (should (eq (orgx-capture-shell--resolve-prepend 'task "/tmp/a.org") nil))))
+
+(ert-deftest orgx-capture-shell-capture-follows-template-end-to-end-test ()
+  "Tasks prepend and journal entries append, per the capture templates."
+  (let ((orgx-capture-shell-prepend 'follow)
+        (org-capture-templates nil))
+    (orgx-capture-shell-test--with-file "* Tasks\n** old\n"
+      (orgx-capture-shell--capture "new" :template 'task :file file :headline "Tasks")
+      (should (equal (orgx-capture-shell-test--contents file)
+                     (concat "* Tasks\n** TODO new\n** old\n"))))
+    (orgx-capture-shell-test--with-file "* Log\n** old\n"
+      (orgx-capture-shell--capture "new" :template 'journal :file file :headline "Log")
+      (should (string-match-p "\\`\\* Log\n\\*\\* old\n\\*\\* new <" (orgx-capture-shell-test--contents file))))))
+
+(ert-deftest orgx-capture-shell-capture-follows-configured-template-test ()
+  "A configured :prepend nil makes tasks append, ahead of an Archive child."
+  (orgx-capture-shell-test--with-file "* Tasks\n** old\n** Archive :ARCHIVE:\n"
+    (let ((orgx-capture-shell-prepend 'follow)
+          (org-capture-templates (list (orgx-capture-shell-test--tpl "tasks" file nil))))
+      (orgx-capture-shell--capture "new" :template 'task :file file :headline "Tasks")
+      (should (equal (orgx-capture-shell-test--contents file)
+                     "* Tasks\n** old\n** TODO new\n** Archive :ARCHIVE:\n")))))
 
 (provide 'orgx-capture-shell-test)
 ;;; orgx-capture-shell-test.el ends here

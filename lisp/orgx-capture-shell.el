@@ -27,6 +27,9 @@
 (require 'org)
 (require 'transient)
 
+(defvar org-capture-templates)
+(defvar org-directory)
+
 (declare-function denote-directory-files "denote")
 (declare-function denote-retrieve-filename-title "denote")
 
@@ -87,6 +90,17 @@ transient menu with editable fields."
 (defcustom orgx-capture-shell-headline-separator "/"
   "Separator for nested outline paths in a target headline (e.g. \"Projects/Tasks\")."
   :type 'string
+  :group 'orgx-capture-shell)
+
+(defcustom orgx-capture-shell-prepend 'follow
+  "Where new entries go within the target section.
+`follow' uses the `:prepend' setting of the matching `org-capture-templates'
+entry (see `orgx-capture-shell--resolve-prepend'); t always inserts at the top
+of the section, before its first child; nil appends.  Either way an entry
+never lands after a trailing child tagged with `org-archive-tag'."
+  :type '(choice (const :tag "Follow the capture template" follow)
+                 (const :tag "Always prepend" t)
+                 (const :tag "Always append" nil))
   :group 'orgx-capture-shell)
 
 (defconst orgx-capture-shell-templates '(task note journal plain)
@@ -195,12 +209,77 @@ transient menu with editable fields."
        (split-string headline (regexp-quote orgx-capture-shell-headline-separator)
                      t "[ \t]+")))
 
-(defun orgx-capture-shell--locate (headline)
+(defconst orgx-capture-shell--template-kinds
+  '((task . "tasks") (note . "notes") (journal . "journal"))
+  "Map shell templates to the kind word starting capture template descriptions.")
+
+(defconst orgx-capture-shell--builtin-prepend
+  '((task . t) (note . t) (journal . nil) (plain . t))
+  "Prepend defaults per shell template, mirroring `orgx-capture'.")
+
+(defun orgx-capture-shell--template-file-p (tpl file)
+  "Return non-nil if the capture template TPL targets FILE."
+  (let ((target (nth 3 tpl)))
+    (and file (consp target) (stringp (nth 1 target))
+         (string-equal (expand-file-name (nth 1 target)
+                                         (and (boundp 'org-directory) org-directory))
+                       (expand-file-name file)))))
+
+(defun orgx-capture-shell--resolve-prepend (template &optional file)
+  "Return non-nil if entries for shell TEMPLATE should be prepended.
+Follows `orgx-capture-shell-prepend'.  In `follow' mode the `:prepend' of
+the `org-capture-templates' entry of the same kind is used, preferring one
+whose target is FILE; absent one, the builtin default for TEMPLATE."
+  (if (not (eq orgx-capture-shell-prepend 'follow))
+      orgx-capture-shell-prepend
+    (let* ((kind (alist-get template orgx-capture-shell--template-kinds))
+           (candidates
+            (and kind (boundp 'org-capture-templates)
+                 (seq-filter (lambda (tpl)
+                               (and (consp tpl) (>= (length tpl) 5)
+                                    (stringp (nth 1 tpl))
+                                    (string-prefix-p kind (nth 1 tpl))))
+                             org-capture-templates)))
+           (tpl (or (seq-find (lambda (c) (orgx-capture-shell--template-file-p c file))
+                              candidates)
+                    (car candidates))))
+      (if tpl
+          (and (plist-get (nthcdr 5 tpl) :prepend) t)
+        (alist-get template orgx-capture-shell--builtin-prepend t)))))
+
+(defun orgx-capture-shell--insertion-point (parent level end &optional prepend)
+  "Return where a new child of the section at LEVEL belongs.
+PARENT is the position of the section's heading, or nil for the whole
+buffer; END is the end of the section.  With PREPEND the position is before
+the first child; otherwise at the end, skipping trailing children tagged
+`org-archive-tag'."
+  (save-excursion
+    (let ((child-level (1+ level))
+          (start (if parent
+                     (progn (goto-char parent) (line-end-position))
+                   (point-min)))
+          children)
+      (goto-char start)
+      (if prepend
+          (if (re-search-forward "^\\*+ " end t) (match-beginning 0) end)
+        (while (re-search-forward "^\\(\\*+\\) " end t)
+          (when (= (length (match-string 1)) child-level)
+            (push (cons (match-beginning 0)
+                        (and (member org-archive-tag (org-get-tags nil t)) t))
+                  children)))
+        (let ((pos end))
+          (while (and children (cdar children))
+            (setq pos (caar children))
+            (pop children))
+          pos)))))
+
+(defun orgx-capture-shell--locate (headline &optional prepend)
   "Find, creating as needed, the insertion point for entries under HEADLINE.
 HEADLINE is an outline path; each segment is searched among the
 descendants of the previous one.  Missing segments are created with the
 correct nesting.  Returns (LEVEL . POSITION) where LEVEL is the level of the
-parent heading (0 at top level) and POSITION is the end of its subtree.
+parent heading (0 at top level) and POSITION is where the entry goes, per
+`orgx-capture-shell--insertion-point' and PREPEND.
 Must be called with the buffer widened."
   (let ((level 0)
         (beg (point-min))
@@ -226,10 +305,11 @@ Must be called with the buffer widened."
           (insert (make-string (1+ level) ?*) " " seg "\n")
           (setq level (1+ level))
           (setq end (point)))))
-    (cons level end)))
+    (cons level (orgx-capture-shell--insertion-point
+                 (and (> level 0) beg) level end prepend))))
 
-(defun orgx-capture-shell--insert-entry (file headline entry-text)
-  "Insert ENTRY-TEXT under HEADLINE in FILE.
+(defun orgx-capture-shell--insert-entry (file headline entry-text &optional prepend)
+  "Insert ENTRY-TEXT under HEADLINE in FILE, at the top if PREPEND.
 HEADLINE may be a nested outline path.  Headings in ENTRY-TEXT are
 re-leveled to be children of the target.  Returns a record
 \(FILE MARKER-POS ENTRY-TEXT) for the undo ring."
@@ -244,7 +324,7 @@ re-leveled to be children of the target.  Returns a record
           (org-mode))
         (let ((rec (save-excursion
                      (org-with-wide-buffer
-                      (let* ((ctx (orgx-capture-shell--locate headline))
+                      (let* ((ctx (orgx-capture-shell--locate headline prepend))
                              (text (orgx-capture-shell--relevel entry-text (1+ (car ctx)))))
                         (goto-char (cdr ctx))
                         (unless (bolp) (insert "\n"))
@@ -299,7 +379,8 @@ description string."
          (entry (if (and body (not (string-empty-p (string-trim body))))
                     (concat entry "\n" (string-trim-right body))
                   entry)))
-    (orgx-capture-shell--insert-entry file headline entry)
+    (orgx-capture-shell--insert-entry
+     file headline entry (orgx-capture-shell--resolve-prepend template file))
     (format "Captured -> [%s%s] %s"
             (file-name-nondirectory file)
             (if (and headline (not (string-empty-p headline)))

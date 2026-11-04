@@ -63,6 +63,13 @@ The prompt shows target and template: =orgx-capture [agentic.org:Tasks|task]>=.
 ** 8. HUD
 =hud-dispatch= lists the shell toggle (=o s=) and the capture form (=o f=) under org-mode.
 
+** Placement
+=orgx-capture-shell-prepend= decides where a new entry goes in the target section:
+- =follow= (default) :: use the =:prepend= of the matching capture template. Task and note entries (and =plain=) go to the top of the section, before its first child; journal entries are appended. A template targeting the current file wins; with none configured the builtin defaults apply.
+- =t= / =nil= :: always prepend / always append.
+
+Entries never land after a trailing child tagged =org-archive-tag= (=ARCHIVE=), so they don't end up below an Archive heading.
+
 ** Known limits
 - Headline names containing the separator (=/=) can't be addressed as a single path segment; set =orgx-capture-shell-headline-separator= to another string.
 - A headline containing => = confuses prompt detection for completion; avoid it in target headlines.
