@@ -638,9 +638,30 @@ buffer position."
         (kill-local-variable sym))))
   (setq-local orgx-mode--saved-settings nil))
 
+(defcustom orgx-use-visual-line t
+  "When non-nil, `orgx-mode' enables `visual-line-mode' in its buffer."
+  :type 'boolean
+  :group 'orgx)
+
+(defvar-local orgx--visual-line-enabled nil
+  "Non-nil if `orgx-mode' turned on `visual-line-mode' in this buffer.")
+
+(defun orgx--enable-visual-line ()
+  "Enable `visual-line-mode' per `orgx-use-visual-line'."
+  (when (and orgx-use-visual-line (not visual-line-mode))
+    (visual-line-mode 1)
+    (setq orgx--visual-line-enabled t)))
+
+(defun orgx--disable-visual-line ()
+  "Disable `visual-line-mode' if `orgx-mode' enabled it."
+  (when orgx--visual-line-enabled
+    (visual-line-mode -1)
+    (setq orgx--visual-line-enabled nil)))
+
 (defun orgx--set-up-buffer ()
   "Configure buffer settings for `orgx-mode'."
   (orgx-mode--apply-settings)
+  (orgx--enable-visual-line)
   (add-hook 'org-ctrl-c-ctrl-c-hook #'orgx-set-weekday-of-timestamp nil t)
   (add-hook 'org-after-todo-state-change-hook #'orgx-enforce-question-answered nil t)
   (add-hook 'org-shiftup-final-hook #'windmove-up nil t)
@@ -652,6 +673,7 @@ buffer position."
 (defun orgx--tear-down-buffer ()
   "Tear down buffer settings for `orgx-mode'."
   (orgx-mode--revert-settings)
+  (orgx--disable-visual-line)
   (remove-hook 'org-ctrl-c-ctrl-c-hook #'orgx-set-weekday-of-timestamp t)
   (remove-hook 'org-after-todo-state-change-hook #'orgx-enforce-question-answered t)
   (remove-hook 'org-shiftup-final-hook #'windmove-up t)

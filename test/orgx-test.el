@@ -34,6 +34,38 @@
   (should (fboundp 'orgx-capture))
   (should (fboundp 'orgx-capture-shell)))
 
+(ert-deftest orgx-mode-visual-line-default-test ()
+  "orgx-mode enables visual-line-mode and disabling it restores the buffer."
+  (let ((orgx--setup-done t))
+    (with-temp-buffer
+      (org-mode)
+      (should orgx-use-visual-line)
+      (orgx-mode 1)
+      (should visual-line-mode)
+      (orgx-mode -1)
+      (should-not visual-line-mode))))
+
+(ert-deftest orgx-mode-visual-line-disabled-test ()
+  "Setting `orgx-use-visual-line' to nil leaves visual-line-mode off."
+  (let ((orgx--setup-done t)
+        (orgx-use-visual-line nil))
+    (with-temp-buffer
+      (org-mode)
+      (orgx-mode 1)
+      (should-not visual-line-mode)
+      (orgx-mode -1)
+      (should-not visual-line-mode))))
+
+(ert-deftest orgx-mode-visual-line-preserves-existing-test ()
+  "A visual-line-mode the user enabled is not turned off by orgx-mode."
+  (let ((orgx--setup-done t))
+    (with-temp-buffer
+      (org-mode)
+      (visual-line-mode 1)
+      (orgx-mode 1)
+      (orgx-mode -1)
+      (should visual-line-mode))))
+
 (ert-deftest orgx-mode-setup-test ()
   "Test that activating orgx-mode applies local settings."
   (with-temp-buffer
