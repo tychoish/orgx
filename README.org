@@ -19,8 +19,8 @@ Org mode extensions, structured capture templates, continuous REPL capture shell
 
 - [[file:docs/capture-shell.org][Orgx Capture Shell Guide]]: In-depth guide to the non-modal capture shell, target resolution cascade, popup window rules, and slash commands.
 - [[file:docs/cli.org][Orgx CLI & Terminal REPL]]: Guide to the native Rust CLI binary, single-shot capture, Sprite protocol connection, and Reedline terminal REPL.
-
 - [[file:docs/refile-agent.org][Refile to Agent Shell]]: Send an Org subtree to an agent-shell queue from =org-refile=.
+- [[file:docs/orgx-mode.org][orgx-mode Buffer Settings]]: Visual line and table shrinking defaults.
 
 * Keybindings
 

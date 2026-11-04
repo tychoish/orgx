@@ -36,6 +36,11 @@
 (require 'ol)
 
 (declare-function org-cycle-force-archived "org-cycle")
+(declare-function org-table--shrink-columns "org-table")
+(declare-function org-table-shrink "org-table")
+(declare-function org-table-expand "org-table")
+(declare-function org-table-map-tables "org-table")
+(declare-function org-table-to-lisp "org-table")
 (declare-function whitespace-cleanup "whitespace")
 (declare-function org-babel-execute:go "ob-go")
 (declare-function org-babel-execute:emacs-lisp "ob-emacs-lisp")
@@ -658,10 +663,90 @@ buffer position."
     (visual-line-mode -1)
     (setq orgx--visual-line-enabled nil)))
 
+;;; Table shrinking
+
+(defcustom orgx-shrink-tables t
+  "When non-nil, `orgx-mode' shrinks wide columns of Org tables on enable.
+Shrinking only changes how tables are displayed, never the buffer text."
+  :type 'boolean
+  :group 'orgx)
+
+(defcustom orgx-table-shrink-width 40
+  "Display width of shrunk Org table columns in `orgx-mode' buffers.
+Columns whose content is wider than this are shrunk to it.  Columns with
+an explicit width cookie keep the cookie's width."
+  :type 'integer
+  :group 'orgx)
+
+(defvar-local orgx--tables-shrunk nil
+  "Non-nil if `orgx-mode' shrank tables in this buffer.")
+
+(defun orgx--ad-table-shrink-field (args)
+  "Filter ARGS of `org-table--shrink-field' to apply `orgx-table-shrink-width'.
+Org shrinks columns without a width cookie to a single character, including
+when it re-shrinks after `org-table-align'; in `orgx-mode' they use the
+configured width instead."
+  (if (and (bound-and-true-p orgx-mode)
+           (eql (car args) 0)
+           (integerp orgx-table-shrink-width)
+           (> orgx-table-shrink-width 0))
+      (cons orgx-table-shrink-width (cdr args))
+    args))
+
+(defun orgx--table-wide-columns (width)
+  "Return the numbers of columns of the table at point wider than WIDTH.
+Columns with a width cookie are excluded."
+  (let ((rows (seq-filter #'listp (org-table-to-lisp)))
+        (maxima nil)
+        (cookies nil))
+    (dolist (row rows)
+      (cl-loop for cell in row
+               for i from 1
+               do (let ((text (string-trim cell)))
+                    (if (string-match-p "\\`<[lrc]?[0-9]+>\\'" text)
+                        (cl-pushnew i cookies)
+                      (setf (alist-get i maxima 0) (max (alist-get i maxima 0)
+                                                        (string-width text)))))))
+    (sort (cl-loop for (i . w) in maxima
+                   when (and (> w width) (not (memq i cookies)))
+                   collect i)
+          #'<)))
+
+(defun orgx--shrink-table-at-point ()
+  "Shrink the wide columns of the Org table at point (display only)."
+  (let ((begin (org-table-begin))
+        (end (org-table-end)))
+    (org-table-shrink begin end)
+    (when-let* ((cols (orgx--table-wide-columns orgx-table-shrink-width)))
+      (org-table--shrink-columns cols begin end))))
+
+;;;###autoload
+(defun orgx-table-shrink-wide-columns ()
+  "Shrink wide columns of all Org tables in the buffer.
+Only the display changes.  Widths are `orgx-table-shrink-width'."
+  (interactive)
+  (when (and (derived-mode-p 'org-mode)
+             (fboundp 'org-table--shrink-columns))
+    (let ((inhibit-message t))
+      (org-table-map-tables #'orgx--shrink-table-at-point t 'org))
+    (setq orgx--tables-shrunk t)))
+
+(defun orgx--enable-table-shrink ()
+  "Shrink tables per `orgx-shrink-tables'."
+  (when (and orgx-shrink-tables (derived-mode-p 'org-mode))
+    (orgx-table-shrink-wide-columns)))
+
+(defun orgx--disable-table-shrink ()
+  "Expand tables shrunk by `orgx-mode'."
+  (when orgx--tables-shrunk
+    (org-table-expand (point-min) (point-max))
+    (setq orgx--tables-shrunk nil)))
+
 (defun orgx--set-up-buffer ()
   "Configure buffer settings for `orgx-mode'."
   (orgx-mode--apply-settings)
   (orgx--enable-visual-line)
+  (orgx--enable-table-shrink)
   (add-hook 'org-ctrl-c-ctrl-c-hook #'orgx-set-weekday-of-timestamp nil t)
   (add-hook 'org-after-todo-state-change-hook #'orgx-enforce-question-answered nil t)
   (add-hook 'org-shiftup-final-hook #'windmove-up nil t)
@@ -674,6 +759,7 @@ buffer position."
   "Tear down buffer settings for `orgx-mode'."
   (orgx-mode--revert-settings)
   (orgx--disable-visual-line)
+  (orgx--disable-table-shrink)
   (remove-hook 'org-ctrl-c-ctrl-c-hook #'orgx-set-weekday-of-timestamp t)
   (remove-hook 'org-after-todo-state-change-hook #'orgx-enforce-question-answered t)
   (remove-hook 'org-shiftup-final-hook #'windmove-up t)
@@ -939,6 +1025,7 @@ Activates `orgx-command-map' under C-c o."
   (advice-add 'toc-org-hrefify-gh :around #'orgx--toc-hrefify-priority)
   (advice-add 'org-agenda-redo :around #'orgx--ad-org-agenda-redo)
   (advice-add 'org-link-open-as-file :around #'orgx-link-github-line-support)
+  (advice-add 'org-table--shrink-field :filter-args #'orgx--ad-table-shrink-field)
   (add-hook 'org-open-link-functions #'orgx-open-custom-id-slug-fallback)
   (orgx-refile-agent-enable))
 
@@ -948,6 +1035,7 @@ Activates `orgx-command-map' under C-c o."
   (advice-remove 'toc-org-hrefify-gh #'orgx--toc-hrefify-priority)
   (advice-remove 'org-agenda-redo #'orgx--ad-org-agenda-redo)
   (advice-remove 'org-link-open-as-file #'orgx-link-github-line-support)
+  (advice-remove 'org-table--shrink-field #'orgx--ad-table-shrink-field)
   (remove-hook 'org-open-link-functions #'orgx-open-custom-id-slug-fallback)
   (orgx-refile-agent-disable))
 

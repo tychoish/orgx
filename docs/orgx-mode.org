@@ -1,0 +1,17 @@
+#+title: orgx-mode Buffer Settings
+#+author: tychoish
+#+language: en
+
+* Visual line
+=orgx-use-visual-line= (default =t=) enables ~visual-line-mode~ in =orgx-mode= buffers. It is only turned off again on teardown if =orgx-mode= turned it on.
+
+* Table shrinking
+=orgx-shrink-tables= (default =t=) shrinks wide Org table columns when =orgx-mode= starts. Columns wider than =orgx-table-shrink-width= (default 40) are cut to that width on screen; columns with an explicit width cookie (=<20>=) keep the cookie's width.
+
+Shrinking only changes the display: the buffer text and file are never modified, and the state isn't saved (it is re-applied each time =orgx-mode= starts). Turning =orgx-mode= off expands the tables it shrank, but not ones you shrank by hand.
+
+- =C-c TAB= (~org-table-toggle-column-width~) toggles the column at point; in =orgx-mode= a column without a cookie shrinks to =orgx-table-shrink-width= instead of one character.
+- ~M-x orgx-table-shrink-wide-columns~ re-applies shrinking, e.g. after pasting a new table.
+- Alignment (=TAB=) keeps shrunk columns at their width.
+
+This relies on Org's table code, so it applies to Org buffers only, not Markdown.

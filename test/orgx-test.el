@@ -66,6 +66,169 @@
       (orgx-mode -1)
       (should visual-line-mode))))
 
+;;; Table shrinking
+
+(defconst orgx-test--wide-table
+  (concat "| a | b | c |\n|---+---+---|\n"
+          "| 12345678901234567890123456789012345678901234567890 | x | <5> |\n"
+          "| y | z | 1234567890 |\n")
+  "Table with a wide column 1, narrow column 2 and cookie'd column 3.")
+
+(defmacro orgx-test--with-table (text &rest body)
+  "Run BODY in an `org-mode' buffer with TEXT, shrink advice and width 10."
+  (declare (indent 1))
+  `(let ((orgx--setup-done t)
+         (orgx-table-shrink-width 10)
+         (orgx-shrink-tables t))
+     (advice-add 'org-table--shrink-field :filter-args #'orgx--ad-table-shrink-field)
+     (unwind-protect
+         (with-temp-buffer
+           (insert ,text)
+           (org-mode)
+           ,@body)
+       (advice-remove 'org-table--shrink-field #'orgx--ad-table-shrink-field))))
+
+(defun orgx-test--shrunk (&optional pos)
+  "Return the shrunk columns of the table at POS (default buffer start)."
+  (goto-char (or pos (point-min)))
+  (org-table--list-shrunk-columns))
+
+(defun orgx-test--hidden-chars ()
+  "Return the number of characters under table-column-hide overlays."
+  (cl-loop for o in (overlays-in (point-min) (point-max))
+           when (eq (overlay-get o 'org-overlay-type) 'table-column-hide)
+           sum (- (overlay-end o) (overlay-start o))))
+
+(ert-deftest orgx-table-shrink-display-only-test ()
+  (orgx-test--with-table orgx-test--wide-table
+    (set-buffer-modified-p nil)
+    (orgx-mode 1)
+    (should (equal (orgx-test--shrunk) '(1 3)))
+    (should (equal (buffer-string) orgx-test--wide-table))
+    (should-not (buffer-modified-p))))
+
+(ert-deftest orgx-table-shrink-leaves-narrow-columns-test ()
+  (orgx-test--with-table "| a | b |\n|---+---|\n| 1 | 2 |\n"
+    (orgx-mode 1)
+    (should-not (orgx-test--shrunk))
+    (should (= 0 (orgx-test--hidden-chars)))))
+
+(ert-deftest orgx-table-wide-columns-test ()
+  (orgx-test--with-table orgx-test--wide-table
+    (goto-char (point-min))
+    (should (equal (orgx--table-wide-columns 10) '(1)))
+    (should (equal (orgx--table-wide-columns 0) '(1 2)))
+    (should (equal (orgx--table-wide-columns 100) nil))))
+
+(ert-deftest orgx-table-wide-columns-counts-display-width-test ()
+  "Wide (CJK) characters count double."
+  (orgx-test--with-table "| a |\n|---|\n| 你好你好你好 |\n"
+    (goto-char (point-min))
+    (should (equal (orgx--table-wide-columns 10) '(1)))
+    (should (equal (orgx--table-wide-columns 12) nil))))
+
+(ert-deftest orgx-table-shrink-uses-configured-width-test ()
+  (orgx-test--with-table "| a |\n|---|\n| 12345678901234567890 |\n"
+    (orgx-mode 1)
+    (let ((hidden-at-10 (orgx-test--hidden-chars)))
+      (orgx-mode -1)
+      (let ((orgx-table-shrink-width 5))
+        (orgx-mode 1)
+        (should (> (orgx-test--hidden-chars) hidden-at-10))))))
+
+;; Realigning changes cell padding, so compare against a table that was
+;; aligned before shrinking.
+(ert-deftest orgx-table-shrink-survives-realign-test ()
+  "`org-table-align' must not collapse default-width columns to one character."
+  (let (expected)
+    (orgx-test--with-table orgx-test--wide-table
+      (goto-char (point-min))
+      (org-table-align)
+      (orgx-mode 1)
+      (setq expected (orgx-test--hidden-chars)))
+    (orgx-test--with-table orgx-test--wide-table
+      (orgx-mode 1)
+      (goto-char (point-min))
+      (org-table-align)
+      (should (equal (orgx-test--shrunk) '(1 3)))
+      (should (> expected 0))
+      (should (= expected (orgx-test--hidden-chars))))))
+
+(ert-deftest orgx-table-shrink-multiple-tables-test ()
+  (orgx-test--with-table (concat orgx-test--wide-table "\ntext\n\n" orgx-test--wide-table)
+    (orgx-mode 1)
+    (should (equal (orgx-test--shrunk) '(1 3)))
+    (should (equal (orgx-test--shrunk (save-excursion (goto-char (point-max))
+                                                      (forward-line -2) (point)))
+                   '(1 3)))))
+
+(ert-deftest orgx-table-shrink-disabled-test ()
+  (orgx-test--with-table orgx-test--wide-table
+    (let ((orgx-shrink-tables nil))
+      (orgx-mode 1)
+      (should (= 0 (orgx-test--hidden-chars)))
+      (should-not orgx--tables-shrunk))))
+
+(ert-deftest orgx-table-shrink-teardown-expands-test ()
+  (orgx-test--with-table orgx-test--wide-table
+    (orgx-mode 1)
+    (should (> (orgx-test--hidden-chars) 0))
+    (orgx-mode -1)
+    (should (= 0 (orgx-test--hidden-chars)))
+    (should (equal (buffer-string) orgx-test--wide-table))))
+
+(ert-deftest orgx-table-shrink-teardown-keeps-user-shrink-test ()
+  "Shrinking the user did by hand survives turning `orgx-mode' off."
+  (orgx-test--with-table orgx-test--wide-table
+    (let ((orgx-shrink-tables nil))
+      (goto-char (point-min))
+      (org-table-shrink)
+      (let ((hidden (orgx-test--hidden-chars)))
+        (should (> hidden 0))
+        (orgx-mode 1)
+        (orgx-mode -1)
+        (should (= hidden (orgx-test--hidden-chars)))))))
+
+(ert-deftest orgx-table-shrink-command-idempotent-test ()
+  (orgx-test--with-table orgx-test--wide-table
+    (orgx-table-shrink-wide-columns)
+    (let ((n (length (overlays-in (point-min) (point-max)))))
+      (orgx-table-shrink-wide-columns)
+      (should (= n (length (overlays-in (point-min) (point-max))))))))
+
+(ert-deftest orgx-table-shrink-ignores-non-org-buffers-test ()
+  (with-temp-buffer
+    (insert orgx-test--wide-table)
+    (fundamental-mode)
+    (orgx-table-shrink-wide-columns)
+    (should (null (overlays-in (point-min) (point-max))))))
+
+(ert-deftest orgx-table-shrink-field-filter-test ()
+  (let ((orgx-table-shrink-width 12))
+    (with-temp-buffer
+      (let ((orgx--setup-done t))
+        (org-mode)
+        (orgx-mode 1)
+        ;; no cookie (width 0): default width
+        (should (equal (orgx--ad-table-shrink-field (list 0 "l" 1 2 "x")) '(12 "l" 1 2 "x")))
+        ;; explicit cookie width kept
+        (should (equal (orgx--ad-table-shrink-field (list 7 "l" 1 2 "x")) '(7 "l" 1 2 "x")))
+        ;; disabled values
+        (let ((orgx-table-shrink-width 0))
+          (should (equal (orgx--ad-table-shrink-field (list 0 "l")) '(0 "l"))))
+        (let ((orgx-table-shrink-width nil))
+          (should (equal (orgx--ad-table-shrink-field (list 0 "l")) '(0 "l"))))
+        (orgx-mode -1)
+        ;; outside orgx-mode: untouched
+        (should (equal (orgx--ad-table-shrink-field (list 0 "l")) '(0 "l")))))))
+
+(ert-deftest orgx-table-shrink-advice-registered-test ()
+  (orgx--enable-advice)
+  (unwind-protect
+      (should (advice-member-p #'orgx--ad-table-shrink-field 'org-table--shrink-field))
+    (orgx--disable-advice))
+  (should-not (advice-member-p #'orgx--ad-table-shrink-field 'org-table--shrink-field)))
+
 (ert-deftest orgx-mode-setup-test ()
   "Test that activating orgx-mode applies local settings."
   (with-temp-buffer
