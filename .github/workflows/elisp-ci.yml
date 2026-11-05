@@ -30,14 +30,14 @@ jobs:
         with:
           load-paths: "lisp"
           target-files: "lisp/*.el"
-          dependencies: "agent-shell-queue"
+          dependencies: "mcpkit agent-shell-queue"
 
       - name: Run ERT Tests
         uses: tychoish/elisp-ci@main
         with:
           load-paths: "lisp test"
           test-files: "test/*-test.el"
-          dependencies: "ob-go ob-rust agent-shell-queue"
+          dependencies: "mcpkit ob-go ob-rust agent-shell-queue"
 
       - name: Measure Code Coverage
         uses: tychoish/elisp-ci/coverage@main
@@ -47,7 +47,7 @@ jobs:
           test-files: "test/*-test.el"
           report-format: "lcov"
           output-file: "coverage/lcov.info"
-          dependencies: "ob-go ob-rust agent-shell-queue"
+          dependencies: "mcpkit ob-go ob-rust agent-shell-queue"
 
       - name: Upload Coverage to Codecov
         uses: codecov/codecov-action@v5
