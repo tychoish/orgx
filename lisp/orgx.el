@@ -934,15 +934,6 @@ Activates `orgx-command-map' under C-c o."
 (defun orgx-babel-setup ()
   "Configure supported Org Babel languages."
   (require 'ob)
-  (unless (fboundp 'org-babel-execute:golang)
-    (defalias 'org-babel-execute:golang #'org-babel-execute:go))
-  (provide 'ob-golang)
-  (unless (fboundp 'org-babel-execute:elisp)
-    (defalias 'org-babel-execute:elisp #'org-babel-execute:emacs-lisp))
-  (provide 'ob-elisp)
-  (unless (fboundp 'org-babel-execute:javascript)
-    (defalias 'org-babel-execute:javascript #'org-babel-execute:js))
-  (provide 'ob-javascript)
   (org-babel-do-load-languages
    'org-babel-load-languages
    (append org-babel-load-languages
@@ -951,15 +942,18 @@ Activates `orgx-command-map' under C-c o."
              (dot . t)
              (js . t)
              (go . t)
-             (rust . t)
-             (golang . t)
-             (elisp . t)
-             (javascript . t))))
-  (with-eval-after-load 'org-src
-    (add-to-list 'org-src-lang-modes '("golang" . go))
-    (add-to-list 'org-src-lang-modes '("elisp" . emacs-lisp))
-    (add-to-list 'org-src-lang-modes '("javascript" . js))
-    (add-to-list 'org-src-lang-modes '("rust" . rust))))
+             (rust . t))))
+  (unless (fboundp 'org-babel-execute:golang)
+    (defalias 'org-babel-execute:golang #'org-babel-execute:go))
+  (unless (fboundp 'org-babel-execute:elisp)
+    (defalias 'org-babel-execute:elisp #'org-babel-execute:emacs-lisp))
+  (unless (fboundp 'org-babel-execute:javascript)
+    (defalias 'org-babel-execute:javascript #'org-babel-execute:js))
+  (require 'org-src)
+  (add-to-list 'org-src-lang-modes '("golang" . go))
+  (add-to-list 'org-src-lang-modes '("elisp" . emacs-lisp))
+  (add-to-list 'org-src-lang-modes '("javascript" . js))
+  (add-to-list 'org-src-lang-modes '("rust" . rust)))
 
 (defvar orgx-global--managed-settings
   `((org-rst-headline-underline-characters . ,(list ?= ?- ?~ ?' ?^ ?`))

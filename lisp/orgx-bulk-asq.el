@@ -8,11 +8,11 @@
 ;; Attaches `org-agenda-mode' buffers as target buffers in `agent-shell-queue'
 ;; (ASQ).
 ;;
-;; Registers the `orgx-bulk' item type (guarded by `with-eval-after-load' and
-;; `fboundp' so `orgx' loads cleanly without the queue installed).  Each queued
-;; item freezes its batch plan at enqueue time, locks marks in the target
-;; agenda buffer until queued bulk items finish, enforces `:queueable' and
-;; `orgx-bulk-asq-max-items', and dispatches through `orgx-bulk-execute'.
+;; Registers the `orgx-bulk' item type when this module is loaded.
+;; Each queued item freezes its batch plan at enqueue
+;; time, locks marks in the target agenda buffer until queued bulk
+;; items finish, enforces `:queueable' and `orgx-bulk-asq-max-items',
+;; and dispatches through `orgx-bulk-execute'.
 
 ;;; Code:
 
@@ -20,6 +20,7 @@
 (require 'seq)
 (require 'subr-x)
 (require 'org-agenda)
+(require 'agent-shell-queue-core)
 (require 'orgx-bulk)
 (require 'orgx-bulk-agenda)
 (require 'orgx-bulk-ops)
@@ -29,7 +30,6 @@
   :type 'integer
   :group 'orgx-bulk)
 
-(declare-function agent-shell-queue-register-item-type "agent-shell-queue-core")
 (declare-function agent-shell-queue-complete-item "agent-shell-queue-core")
 (declare-function agent-shell-queue--complete-item "agent-shell-queue-core")
 (declare-function agent-shell-queue--enqueue-args "agent-shell-queue-core")
@@ -246,24 +246,19 @@ post-completion pause delay in seconds before the next queued item runs."
 ;;; Registration
 
 (defun orgx-bulk-asq-register ()
-  "Register the `orgx-bulk' item type with `agent-shell-queue' when available."
-  (when (fboundp 'agent-shell-queue-register-item-type)
-    (agent-shell-queue-register-item-type
-     :kind 'orgx-bulk
-     :label "orgx-bulk"
-     :buffer-pred (lambda (buf)
-                    (and (buffer-live-p buf)
-                         (with-current-buffer buf
-                           (derived-mode-p 'org-agenda-mode))))
-     :dispatch-fn #'orgx-bulk-asq-dispatch
-     :input-spec (list :kind 'special
-                       :fn #'orgx-bulk-asq-enqueue))))
+  "Register the `orgx-bulk' item type with `agent-shell-queue'."
+  (agent-shell-queue-register-item-type
+   :kind 'orgx-bulk
+   :label "orgx-bulk"
+   :buffer-pred (lambda (buf)
+                  (and (buffer-live-p buf)
+                       (with-current-buffer buf
+                         (derived-mode-p 'org-agenda-mode))))
+   :dispatch-fn #'orgx-bulk-asq-dispatch
+   :input-spec (list :kind 'special
+                     :fn #'orgx-bulk-asq-enqueue)))
 
-(with-eval-after-load 'agent-shell-queue
-  (orgx-bulk-asq-register))
-
-(with-eval-after-load 'agent-shell-queue-core
-  (orgx-bulk-asq-register))
+(orgx-bulk-asq-register)
 
 (provide 'orgx-bulk-asq)
 ;;; orgx-bulk-asq.el ends here
