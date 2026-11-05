@@ -33,6 +33,8 @@
 (require 'orgx-refile-agent)
 (require 'org-agenda)
 (require 'org-archive)
+(require 'ob)
+(require 'org-src)
 (require 'ol)
 
 (declare-function org-cycle-force-archived "org-cycle")
@@ -933,10 +935,12 @@ Activates `orgx-command-map' under C-c o."
 
 (defun orgx-babel-setup ()
   "Configure supported Org Babel languages."
-  (require 'ob)
+  ;; Aliases use the canonical backends and have no corresponding ob-* files.
   (org-babel-do-load-languages
    'org-babel-load-languages
-   (append org-babel-load-languages
+   (append (seq-remove (lambda (language)
+                         (memq (car language) '(golang elisp javascript)))
+                       org-babel-load-languages)
            '((python . t)
              (emacs-lisp . t)
              (dot . t)
@@ -949,7 +953,6 @@ Activates `orgx-command-map' under C-c o."
     (defalias 'org-babel-execute:elisp #'org-babel-execute:emacs-lisp))
   (unless (fboundp 'org-babel-execute:javascript)
     (defalias 'org-babel-execute:javascript #'org-babel-execute:js))
-  (require 'org-src)
   (add-to-list 'org-src-lang-modes '("golang" . go))
   (add-to-list 'org-src-lang-modes '("elisp" . emacs-lisp))
   (add-to-list 'org-src-lang-modes '("javascript" . js))
