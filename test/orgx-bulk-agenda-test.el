@@ -19,8 +19,7 @@
           (,f1-var (make-temp-file "orgx-ag-1-" nil ".org" ,c1))
           (,f2-var (make-temp-file "orgx-ag-2-" nil ".org" ,c2))
           (org-todo-keywords '((sequence "TODO" "INPROGRESS" "|" "DONE" "CANCELED")))
-          (orgx-bulk--plans (make-hash-table :test #'equal))
-          (orgx-bulk--counter 0)
+          (hitl-plan--store (make-hash-table :test #'equal))
           (org-agenda-bulk-marked-entries nil))
      (unwind-protect
          (progn
@@ -35,7 +34,7 @@
                                 (list (expand-file-name ,f1-var)
                                       (expand-file-name ,f2-var))))
                    (string-prefix-p "*Org Agenda" (buffer-name buf))
-                   (string-prefix-p "*orgx-bulk:" (buffer-name buf)))
+                   (string-prefix-p "*hitl-plan:" (buffer-name buf)))
            (with-current-buffer buf (set-buffer-modified-p nil))
            (kill-buffer buf)))
        (dolist (f (list ,f1-var ,f2-var))
@@ -96,7 +95,7 @@
           (with-current-buffer rebuilt-buf
             (should (seq-some (lambda (o) (eq (overlay-get o 'type) 'org-marked-entry-overlay))
                               (overlays-in (point-min) (point-max))))))
-        (should (equal (mapcar #'orgx-bulk-step-status (orgx-bulk-plan-steps plan))
+        (should (equal (mapcar #'hitl-plan-step-status (hitl-plan-steps plan))
                        '(pending missing)))))))
 
 (ert-deftest orgx-bulk-agenda-mark-lock-test ()
@@ -133,9 +132,9 @@
       (let ((plan (orgx-bulk-get-plan
                    (buffer-local-value 'orgx-bulk-batch-plan-id buf))))
         (should plan)
-        (should (eq (orgx-bulk-plan-status plan) 'draft))
-        (should (eq (orgx-bulk-plan-log-notes plan) 'ignore))
-        (should (get-buffer (orgx-bulk-plan-buffer-name plan))))
+        (should (eq (hitl-plan-status plan) 'draft))
+        (should (eq (hitl-plan-log-notes plan) 'ignore))
+        (should (get-buffer (hitl-plan-ui-buffer-name plan))))
       ;; 2. `C-u B' (`arg' = '(4)) executes the plan immediately.
       (with-current-buffer buf
         (let ((org-agenda-bulk-marked-entries orgx-bulk-batch-markers))
@@ -144,7 +143,7 @@
             (orgx-agenda-bulk-action '(4)))))
       (let ((plan (orgx-bulk-get-plan
                    (buffer-local-value 'orgx-bulk-batch-plan-id buf))))
-        (should (eq (orgx-bulk-plan-status plan) 'complete))
+        (should (eq (hitl-plan-status plan) 'complete))
         (with-current-buffer (find-file-noselect f1)
           (should (equal (org-map-entries #'org-get-todo-state) '("DONE" "DONE"))))))))
 

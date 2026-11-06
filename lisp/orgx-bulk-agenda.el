@@ -24,6 +24,7 @@
 
 (declare-function orgx-denote-files "orgx-denote")
 (declare-function orgx-bulk-review "orgx-bulk-buffer")
+(declare-function orgx-bulk--agenda-buffer-p "orgx-bulk")
 
 (defvar org-agenda-sticky)
 (defvar org-agenda-files)
@@ -44,13 +45,16 @@
   "Non-nil when `orgx-bulk' itself is manipulating agenda marks.")
 
 (defun orgx-bulk-batch-lock (buffer &optional reason)
-  "Lock agenda marks in BUFFER for REASON until unlocked."
+  "Lock agenda marks in BUFFER for REASON (a plan ID) until unlocked.
+Also the `org-agenda' domain's `hitl-plan' :lock-batch, called as
+\(BUFFER PLAN-ID)."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (setq-local orgx-bulk-batch-locked (or reason t)))))
 
 (defun orgx-bulk-batch-unlock (buffer)
-  "Unlock agenda marks in BUFFER."
+  "Unlock agenda marks in BUFFER.
+Also the `org-agenda' domain's `hitl-plan' :unlock-batch, called as (BUFFER)."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (setq-local orgx-bulk-batch-locked nil))))
@@ -128,20 +132,55 @@ property stored on that agenda line, or nil if not found."
 
 ;;; Scope and Batch Builders
 
+(defun orgx-bulk-agenda--scope-type (scope)
+  "Return the type of SCOPE as a symbol.
+The type may be a symbol or, as it arrives over MCP, a string such as
+\"agenda\", \"files\", \"agenda-files\" (or \"agenda_files\"), \"denote-files\"
+\(or \"denote\") and \"buffer\"; it defaults to `files'.  An unknown type is
+an error for MCP-origin plans and `files' otherwise."
+  (let* ((raw (plist-get scope :type))
+         (name (cond ((null raw) "files")
+                     ((symbolp raw) (symbol-name raw))
+                     ((stringp raw) raw)
+                     (t (format "%s" raw)))))
+    (pcase (replace-regexp-in-string "_" "-" name)
+      ("agenda" 'agenda)
+      ("buffer" 'buffer)
+      ("agenda-files" 'agenda-files)
+      ((or "denote-files" "denote") 'denote-files)
+      ("files" 'files)
+      (_ (if (hitl-plan-restricted-p)
+             (error "Unknown scope type: %s" (truncate-string-to-width name 40 nil nil "..."))
+           'files)))))
+
 (defun orgx-bulk-agenda--scope-files (scope)
-  "Resolve the list of Org files for SCOPE plist."
-  (let ((type (or (plist-get scope :type) 'files))
-        (files (plist-get scope :files))
-        (file (plist-get scope :file)))
-    (seq-filter
-     (lambda (f) (and (stringp f) (file-exists-p f)))
-     (mapcar #'expand-file-name
-             (pcase type
-               ('buffer (and file (list file)))
-               ('agenda-files (org-agenda-files))
-               ('denote-files (and (fboundp 'orgx-denote-files) (orgx-denote-files)))
-               ('files files)
-               (_ (or files (and file (list file)))))))))
+  "Resolve the list of Org files for SCOPE plist.
+For MCP-origin plans, files named in SCOPE (types `files' and `buffer') must
+each be allowed (`orgx-bulk-file-allowed-p') or the whole scope is rejected
+with one uniform error; `agenda-files' and `denote-files' scopes ignore any
+file list the caller gave."
+  (let* ((type (orgx-bulk-agenda--scope-type scope))
+         (files (plist-get scope :files))
+         (file (plist-get scope :file))
+         (named (pcase type
+                  ('agenda nil)
+                  ('buffer (and file (list file)))
+                  ('files files)
+                  (_ (or files (and file (list file)))))))
+    (cond
+     ((eq type 'agenda) nil)
+     ((eq type 'agenda-files)
+      (seq-filter (lambda (f) (and (stringp f) (file-exists-p f)))
+                  (mapcar #'expand-file-name (org-agenda-files))))
+     ((eq type 'denote-files)
+      (seq-filter (lambda (f) (and (stringp f) (file-exists-p f)))
+                  (mapcar #'expand-file-name
+                          (and (fboundp 'orgx-denote-files) (orgx-denote-files)))))
+     ((hitl-plan-restricted-p)
+      (unless (proper-list-p named) (error "Scope files must be a list"))
+      (mapcar #'orgx-bulk--check-file named))
+     (t (seq-filter (lambda (f) (and (stringp f) (file-exists-p f)))
+                    (mapcar #'expand-file-name named))))))
 
 (defun orgx-bulk-agenda--heading-matches-filter-p (marker scope)
   "Return non-nil if MARKER satisfies `:from-states' and `:only-open' in SCOPE."
@@ -160,15 +199,29 @@ property stored on that agenda line, or nil if not found."
 Returns `(AGENDA-BUFFER . TARGETS)' and sets buffer-local
 `orgx-bulk-batch-markers' in AGENDA-BUFFER.  Preserves global
 `org-agenda-bulk-marked-entries' so other sticky agendas are unaffected."
-  (let ((type (or (plist-get scope :type) 'files))
+  (let ((type (orgx-bulk-agenda--scope-type scope))
         (saved-global-marks org-agenda-bulk-marked-entries)
         (orgx-bulk--internal-marking t))
+    (when (hitl-plan-restricted-p)
+      (dolist (key '(:match))
+        (let ((v (plist-get scope key)))
+          (unless (or (null v) (stringp v)) (error "Scope `%s' must be a string" key))))
+      (let ((v (plist-get scope :from-states)))
+        (unless (and (proper-list-p v) (cl-every #'stringp v))
+          (error "Scope `from-states' must be a list of strings"))))
     (unwind-protect
         (if (eq type 'agenda)
             (let* ((buf-name (plist-get scope :buffer-name))
-                   (buf (or (and buf-name (get-buffer buf-name))
-                            (and (derived-mode-p 'org-agenda-mode) (current-buffer))
-                            (error "Agenda buffer not found for scope: %S" scope))))
+                   (buf (if (hitl-plan-restricted-p)
+                            ;; An agent may only name an existing agenda buffer;
+                            ;; never fall back to whatever buffer is current.
+                            (let ((b (and (stringp buf-name) (get-buffer buf-name))))
+                              (if (and b (orgx-bulk--agenda-buffer-p b))
+                                  b
+                                (error "Agenda buffer not found")))
+                          (or (and buf-name (get-buffer buf-name))
+                              (and (derived-mode-p 'org-agenda-mode) (current-buffer))
+                              (error "Agenda buffer not found for scope: %S" scope)))))
               (with-current-buffer buf
                 (let* ((line-markers (orgx-bulk-agenda--line-markers buf))
                        (marked (or (seq-filter (lambda (m) (memq m line-markers))
@@ -204,7 +257,8 @@ Returns `(AGENDA-BUFFER . TARGETS)' and sets buffer-local
                       (org-agenda-sticky t)
                       (org-agenda-window-setup 'current-window)
                       (org-agenda-bulk-marked-entries nil))
-                  (org-tags-view nil match-str)
+                  (orgx-bulk--with-safe-visiting
+                    (org-tags-view nil match-str))
                   (setq agenda-buf (current-buffer))
                   (goto-char (point-min))
                   (while (not (eobp))
@@ -228,10 +282,15 @@ Returns `(AGENDA-BUFFER . TARGETS)' and sets buffer-local
   "Ensure an agenda buffer for PLAN contains lines for RESOLVED-MARKERS.
 Returns `(AGENDA-BUFFER . BATCH-MARKERS)' where each element of BATCH-MARKERS
 is the exact (`eq') `org-hd-marker' property on a line in AGENDA-BUFFER."
-  (let* ((scope (orgx-bulk-plan-scope plan))
+  (let* ((scope (hitl-plan-scope plan))
          (buf-name (or (plist-get scope :buffer-name)
-                       (format "*Org Agenda(orgx-bulk:%s)*" (orgx-bulk-plan-id plan))))
+                       (format "*Org Agenda(orgx-bulk:%s)*" (hitl-plan-id plan))))
          (buf (get-buffer buf-name)))
+    ;; Never repurpose an arbitrary buffer for an untrusted plan.
+    (when (and buf (hitl-plan-restricted-p) (not (orgx-bulk--agenda-buffer-p buf)))
+      (setq buf nil
+            buf-name (format "*Org Agenda(orgx-bulk:%s)*" (hitl-plan-id plan))
+            buf (get-buffer buf-name)))
     (unless (buffer-live-p buf)
       (let ((files (or (orgx-bulk-agenda--scope-files scope)
                        (seq-uniq
@@ -246,7 +305,8 @@ is the exact (`eq') `org-hd-marker' property on a line in AGENDA-BUFFER."
                     (org-agenda-sticky t)
                     (org-agenda-window-setup 'current-window)
                     (match (or (plist-get scope :match) "LEVEL>=1")))
-                (org-tags-view nil (if (string-empty-p match) "LEVEL>=1" match))
+                (orgx-bulk--with-safe-visiting
+                  (org-tags-view nil (if (string-empty-p match) "LEVEL>=1" match)))
                 (setq buf (current-buffer))))
           (setq buf (get-buffer-create buf-name))
           (with-current-buffer buf
@@ -260,41 +320,58 @@ is the exact (`eq') `org-hd-marker' property on a line in AGENDA-BUFFER."
             (push (orgx-bulk-agenda--append-line-for-marker rm buf) batch-markers)))
         (setq batch-markers (nreverse batch-markers))
         (setq-local orgx-bulk-batch-markers batch-markers)
-        (setq-local orgx-bulk-batch-plan-id (orgx-bulk-plan-id plan))
+        (setq-local orgx-bulk-batch-plan-id (hitl-plan-id plan))
         (cons buf batch-markers)))))
+
+(defun orgx-bulk-batch-rebuild-batch (plan)
+  "Rebuild PLAN's agenda batch for `hitl-plan'; the :rebuild-batch function.
+Returns (AGENDA-BUFFER . ALIST) where ALIST maps each pending step whose
+target still resolves to the exact (`eq') `org-hd-marker' on its agenda
+line.  Steps that no longer resolve are left out for `hitl-plan' to fail."
+  (let ((orgx-bulk--internal-marking t)
+        steps markers)
+    (dolist (step (hitl-plan-steps plan))
+      (when (eq (hitl-plan-step-status step) 'pending)
+        (when-let* ((m (orgx-bulk--resolve-target (hitl-plan-step-target step))))
+          (push step steps)
+          (push m markers))))
+    (setq steps (nreverse steps)
+          markers (nreverse markers))
+    (pcase-let ((`(,buf . ,batch-markers)
+                 (orgx-bulk-batch-ensure-agenda plan markers)))
+      (cons buf (cl-mapcar #'cons steps batch-markers)))))
 
 (defun orgx-bulk-batch-rebuild (plan)
   "Rebuild the agenda buffer and marks for a resumed PLAN.
-Opens or recreates PLAN's agenda buffer and re-marks the steps whose targets
-still resolve via `orgx-bulk--resolve-target'.  Steps whose targets no longer
-resolve are marked `missing'.  Returns the agenda buffer."
-  (let ((resolved-markers nil)
-        (rebuilt-marks nil)
-        (orgx-bulk--internal-marking t))
-    (dolist (step (orgx-bulk-plan-steps plan))
-      (when (eq (orgx-bulk-step-status step) 'pending)
-        (if-let* ((m (orgx-bulk--resolve-target (orgx-bulk-step-target step))))
-            (push m resolved-markers)
-          (setf (orgx-bulk-step-status step) 'missing
-                (orgx-bulk-step-message step) "Target heading not found"))))
-    (setq resolved-markers (nreverse resolved-markers))
-    (pcase-let ((`(,buf . ,batch-markers)
-                 (orgx-bulk-batch-ensure-agenda plan resolved-markers)))
-      (with-current-buffer buf
-        ;; Mark with an isolated list, then add the result to the global marks
-        ;; so the resumed batch stays marked without disturbing other agendas.
-        (let ((org-agenda-bulk-marked-entries nil))
-          (org-agenda-bulk-unmark-all)
-          (dolist (bm batch-markers)
-            (when-let* ((pos (text-property-any (point-min) (point-max) 'org-hd-marker bm)))
-              (goto-char pos)
-              (org-agenda-bulk-mark)))
-          (setq rebuilt-marks org-agenda-bulk-marked-entries))
-        (setq-local orgx-bulk-batch-markers batch-markers))
-      (setq org-agenda-bulk-marked-entries
-            (append rebuilt-marks org-agenda-bulk-marked-entries))
-      (orgx-bulk-save plan)
-      buf)))
+Opens or recreates PLAN's agenda batch via the domain's :rebuild-batch (see
+`hitl-plan-rebuild-batch', which also marks steps whose targets no longer
+resolve with the domain's `missing' status) and re-marks the surviving
+steps.  Returns the agenda buffer."
+  (let ((orgx-bulk--internal-marking t)
+        buf batch-markers rebuilt-marks)
+    (dolist (op (hitl-plan-ops plan))
+      (let ((batch (hitl-plan-rebuild-batch plan op)))
+        (setq buf (or buf (car batch)))
+        (dolist (cell (cdr batch))
+          (cl-pushnew (cdr cell) batch-markers))))
+    (setq batch-markers (nreverse batch-markers))
+    (unless buf
+      (setq buf (car (orgx-bulk-batch-ensure-agenda plan nil))))
+    (with-current-buffer buf
+      ;; Mark with an isolated list, then add the result to the global marks
+      ;; so the resumed batch stays marked without disturbing other agendas.
+      (let ((org-agenda-bulk-marked-entries nil))
+        (org-agenda-bulk-unmark-all)
+        (dolist (bm batch-markers)
+          (when-let* ((pos (text-property-any (point-min) (point-max) 'org-hd-marker bm)))
+            (goto-char pos)
+            (org-agenda-bulk-mark)))
+        (setq rebuilt-marks org-agenda-bulk-marked-entries))
+      (setq-local orgx-bulk-batch-markers batch-markers))
+    (setq org-agenda-bulk-marked-entries
+          (append rebuilt-marks org-agenda-bulk-marked-entries))
+    (hitl-plan-save plan)
+    buf))
 
 ;;; Interactive Scope Reader (used by `orgx-bulk-todo-state')
 
@@ -354,14 +431,14 @@ resolve are marked `missing'.  Returns the agenda buffer."
 
 (defun orgx-bulk-agenda--prompt-key ()
   "Prompt for a registered bulk operation key and return the character."
-  (let* ((ops (sort (copy-sequence (orgx-bulk-registered-ops))
+  (let* ((ops (sort (copy-sequence (hitl-plan-registered-ops 'org-agenda))
                     (lambda (a b)
-                      (< (or (orgx-bulk-op-spec-key a) 0)
-                         (or (orgx-bulk-op-spec-key b) 0)))))
+                      (< (or (hitl-plan-op-spec-key a) 0)
+                         (or (hitl-plan-op-spec-key b) 0)))))
          (keys-desc
           (mapconcat (lambda (spec)
-                       (if-let* ((k (orgx-bulk-op-spec-key spec)))
-                           (format "[%c]%s" k (orgx-bulk-op-spec-label spec))
+                       (if-let* ((k (hitl-plan-op-spec-key spec)))
+                           (format "[%c]%s" k (hitl-plan-op-spec-label spec))
                          ""))
                      ops " ")))
     (message "orgx-bulk: %s" keys-desc)
@@ -370,7 +447,7 @@ resolve are marked `missing'.  Returns the agenda buffer."
 ;;;###autoload
 (defun orgx-agenda-bulk-action (&optional arg)
   "Plan or execute a bulk operation on marked entries in the current agenda.
-By default, builds and saves an `orgx-bulk-plan' and opens its plan buffer.
+By default, builds and saves a `hitl-plan' and opens its plan buffer.
 With `\\[universal-argument]' (ARG = `(4)'), executes the plan immediately.
 With a numeric prefix ARG, sets `orgx-bulk-log-notes' for the plan (`0' =
 `ignore', `1' = `one', `2+' = `each')."
@@ -397,10 +474,10 @@ With a numeric prefix ARG, sets `orgx-bulk-log-notes' for the plan (`0' =
     (let* ((key (orgx-bulk-agenda--prompt-key))
            (spec (or (orgx-bulk-op-for-key key)
                      (user-error "Unknown bulk operation key: %c" key)))
-           (op-args (when-let* ((reader (orgx-bulk-op-spec-read-args spec)))
+           (op-args (when-let* ((reader (hitl-plan-op-spec-read-args spec)))
                       (funcall reader)))
            (log-notes (orgx-bulk-agenda--prefix-log-notes arg))
-           (note (when (and (eq (orgx-bulk-op-spec-name spec) 'todo-state)
+           (note (when (and (eq (hitl-plan-op-spec-name spec) 'todo-state)
                             (eq log-notes 'one))
                    (read-string "Log note for plan: ")))
            (targets (delq nil
@@ -409,18 +486,18 @@ With a numeric prefix ARG, sets `orgx-bulk-log-notes' for the plan (`0' =
                                       (orgx-bulk--target-at-point)))
                                   marked)))
            (scope (list :type 'agenda :buffer-name (buffer-name)))
-           (op (orgx-bulk-op--create :name (orgx-bulk-op-spec-name spec)
+           (op (orgx-bulk-op--create :name (hitl-plan-op-spec-name spec)
                                      :args op-args))
            (plan (orgx-bulk-create-plan
                   :scope scope
                   :targets targets
                   :ops (list op)
                   :description (format "%s in %s"
-                                       (orgx-bulk-describe-op op)
+                                       (hitl-plan-describe-op 'org-agenda op)
                                        (buffer-name))
                   :log-notes log-notes
                   :note note)))
-      (setq-local orgx-bulk-batch-plan-id (orgx-bulk-plan-id plan))
+      (setq-local orgx-bulk-batch-plan-id (hitl-plan-id plan))
       (if (equal arg '(4))
           (orgx-bulk-execute plan)
         (orgx-bulk-review plan t)))))

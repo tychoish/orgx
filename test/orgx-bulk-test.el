@@ -17,8 +17,7 @@
           (,file-var (make-temp-file "orgx-bulk-" nil ".org" ,content))
           (org-todo-keywords '((sequence "TODO(t)" "INPROGRESS(p)" "|" "DONE(d@)" "CANCELED(c@)")))
           (org-agenda-files (list ,file-var))
-          (orgx-bulk--plans (make-hash-table :test #'equal))
-          (orgx-bulk--counter 0)
+          (hitl-plan--store (make-hash-table :test #'equal))
           (orgx-bulk-log-notes 'ignore)
           (orgx-bulk-assign-ids nil)
           (orgx-bulk-inhibit-blocking nil))
@@ -33,7 +32,7 @@
                         (equal (expand-file-name (buffer-file-name buf))
                                (expand-file-name ,file-var)))
                    (string-prefix-p "*Org Agenda" (buffer-name buf))
-                   (string-prefix-p "*orgx-bulk:" (buffer-name buf)))
+                   (string-prefix-p "*hitl-plan:" (buffer-name buf)))
            (with-current-buffer buf (set-buffer-modified-p nil))
            (kill-buffer buf)))
        (when (file-exists-p ,file-var)
@@ -63,20 +62,20 @@
                   :description "Roundtrip test"
                   :log-notes 'one
                   :note "Finished batch")))
-      (setf (orgx-bulk-step-note (car (orgx-bulk-plan-steps plan))) "step-note")
-      (orgx-bulk-save plan)
-      (clrhash orgx-bulk--plans)
-      (let ((loaded (orgx-bulk-load (orgx-bulk-plan-id plan))))
-        (should (equal (orgx-bulk-plan-id loaded) (orgx-bulk-plan-id plan)))
-        (should (equal (orgx-bulk-plan-description loaded) "Roundtrip test"))
-        (should (eq (orgx-bulk-plan-status loaded) 'draft))
-        (should (eq (orgx-bulk-plan-log-notes loaded) 'one))
-        (should (equal (orgx-bulk-plan-note loaded) "Finished batch"))
-        (should (= (length (orgx-bulk-plan-ops loaded)) 1))
-        (should (= (length (orgx-bulk-plan-steps loaded)) 2))
-        (should (eq (orgx-bulk-step-op (car (orgx-bulk-plan-steps loaded)))
-                    (car (orgx-bulk-plan-ops loaded))))
-        (should (equal (orgx-bulk-step-note (car (orgx-bulk-plan-steps loaded)))
+      (setf (hitl-plan-step-note (car (hitl-plan-steps plan))) "step-note")
+      (hitl-plan-save plan)
+      (clrhash hitl-plan--store)
+      (let ((loaded (orgx-bulk-load (hitl-plan-id plan))))
+        (should (equal (hitl-plan-id loaded) (hitl-plan-id plan)))
+        (should (equal (hitl-plan-description loaded) "Roundtrip test"))
+        (should (eq (hitl-plan-status loaded) 'draft))
+        (should (eq (hitl-plan-log-notes loaded) 'one))
+        (should (equal (hitl-plan-note loaded) "Finished batch"))
+        (should (= (length (hitl-plan-ops loaded)) 1))
+        (should (= (length (hitl-plan-steps loaded)) 2))
+        (should (eq (hitl-plan-step-op (car (hitl-plan-steps loaded)))
+                    (car (hitl-plan-ops loaded))))
+        (should (equal (hitl-plan-step-note (car (hitl-plan-steps loaded)))
                        "step-note"))))))
 
 (ert-deftest orgx-bulk-corrupt-file-error-test ()
@@ -98,20 +97,20 @@
            (p2 (orgx-bulk-create-plan :targets targets :ops '((todo-state "CANCELED")))))
       (should (= (length (orgx-bulk-list-plans '(draft))) 2))
       (orgx-bulk-discard p1)
-      (should (eq (orgx-bulk-plan-status p1) 'discarded))
-      (should (equal (mapcar #'orgx-bulk-plan-id (orgx-bulk-list-plans '(draft)))
-                     (list (orgx-bulk-plan-id p2)))))))
+      (should (eq (hitl-plan-status p1) 'discarded))
+      (should (equal (mapcar #'hitl-plan-id (orgx-bulk-list-plans '(draft)))
+                     (list (hitl-plan-id p2)))))))
 
 (ert-deftest orgx-bulk-list-plans-keeps-live-plan-objects-test ()
   ;; Listing must not replace in-memory plans with stale on-disk copies.
   (orgx-bulk-test--with-env f "* TODO Alpha\n"
     (let ((plan (orgx-bulk-create-plan :targets (orgx-bulk-test--targets f)
                                        :ops '((todo-state "DONE")))))
-      (setf (orgx-bulk-plan-description plan) "unsaved edit")
+      (setf (hitl-plan-description plan) "unsaved edit")
       (orgx-bulk-list-plans)
-      (should (eq (orgx-bulk-get-plan (orgx-bulk-plan-id plan)) plan))
+      (should (eq (orgx-bulk-get-plan (hitl-plan-id plan)) plan))
       ;; Plans only on disk are still discovered.
-      (clrhash orgx-bulk--plans)
+      (clrhash hitl-plan--store)
       (should (= (length (orgx-bulk-list-plans)) 1)))))
 
 (ert-deftest orgx-bulk-add-op-reopens-complete-plan-test ()
@@ -119,14 +118,96 @@
     (let ((plan (orgx-bulk-create-plan :targets (orgx-bulk-test--targets f)
                                        :ops '((todo-state "DONE")))))
       (orgx-bulk-execute plan)
-      (should (eq (orgx-bulk-plan-status plan) 'complete))
-      (orgx-bulk-plan-add-op plan (orgx-bulk-op--create :name 'tag-add :args '("x")))
-      (should (eq (orgx-bulk-plan-status plan) 'paused))
+      (should (eq (hitl-plan-status plan) 'complete))
+      (hitl-plan-add-op plan (orgx-bulk-op--create :name 'tag-add :args '("x")))
+      (should (eq (hitl-plan-status plan) 'paused))
       (orgx-bulk-execute plan)
-      (should (eq (orgx-bulk-plan-status plan) 'complete))
+      (should (eq (hitl-plan-status plan) 'complete))
       (with-current-buffer (find-file-noselect f)
         (should (member "x" (org-with-wide-buffer (goto-char (point-min))
                                                   (org-get-tags))))))))
+
+(ert-deftest orgx-bulk-loads-legacy-orgx-plan-file-test ()
+  ;; Pre-hitl orgx files have no `:domain' and steps carry an inline `:op'.
+  (orgx-bulk-test--with-env f "* TODO Alpha\n"
+    (with-temp-file (expand-file-name "old-1.eld" orgx-bulk-directory)
+      (pp (list :version hitl-plan-format-version :id "old-1" :status 'paused
+                :created "2026-01-01T00:00:00+0000"
+                :ops (list (list :name 'todo-state :args '("DONE")))
+                :steps (list (list :id 1 :target (list :file f :heading "Alpha")
+                                   :op (list :name 'todo-state :args '("DONE"))
+                                   :status 'pending)))
+          (current-buffer)))
+    (let ((plan (car (orgx-bulk-list-plans '(paused)))))
+      (should (equal (hitl-plan-id plan) "old-1"))
+      (should (eq (hitl-plan-domain plan) 'org-agenda))
+      (should (eq (hitl-plan-step-op (car (hitl-plan-steps plan)))
+                  (car (hitl-plan-ops plan))))
+      (should (eq (orgx-bulk-get-plan "old-1") plan))
+      (orgx-bulk-execute plan)
+      (should (equal (orgx-bulk-test--states f) '("DONE"))))))
+
+;; Legacy files in `orgx-bulk-directory' derive `org-agenda' from the domain
+;; store, with no explicit domain or resolver.
+(defun orgx-bulk-test--write-legacy (f dir)
+  (with-temp-file (expand-file-name "old-1.eld" dir)
+    (pp (list :version hitl-plan-format-version :id "old-1" :status 'paused
+              :created "2026-01-01T00:00:00+0000"
+              :ops (list (list :name 'todo-state :args '("DONE")))
+              :steps (list (list :id 1 :target (list :file f :heading "Alpha")
+                                 :op (list :name 'todo-state :args '("DONE"))
+                                 :status 'pending)))
+        (current-buffer))))
+
+(ert-deftest orgx-bulk-legacy-derived-from-store-test ()
+  (orgx-bulk-test--with-env f "* TODO Alpha\n"
+    (orgx-bulk-test--write-legacy f orgx-bulk-directory)
+    ;; hitl-plan-get with the store directory, no domain.
+    (let ((plan (hitl-plan-get "old-1" orgx-bulk-directory)))
+      (should (eq 'org-agenda (hitl-plan-domain plan))))
+    (clrhash hitl-plan--store)
+    ;; hitl-plan-get with the domain only.
+    (should (eq 'org-agenda (hitl-plan-domain (hitl-plan-get "old-1" nil 'org-agenda))))
+    (clrhash hitl-plan--store)
+    ;; hitl-plan-list.
+    (should (equal '(org-agenda)
+                   (mapcar #'hitl-plan-domain
+                           (hitl-plan-list '(paused) orgx-bulk-directory))))
+    (clrhash hitl-plan--store)
+    ;; UI refresh path: reload by id from the plan's directory.
+    (let ((plan (hitl-plan-load "old-1" orgx-bulk-directory)))
+      (clrhash hitl-plan--store)
+      (should (eq 'org-agenda
+                  (hitl-plan-domain
+                   (hitl-plan-load (hitl-plan-id plan) (hitl-plan-directory plan))))))
+    (clrhash hitl-plan--store)
+    ;; ASQ dispatch lookup: default dir, then each domain store.
+    (should (eq 'org-agenda
+                (hitl-plan-domain
+                 (seq-some (lambda (dir) (hitl-plan-get "old-1" dir))
+                           (delq nil (mapcar #'hitl-plan-domain-store
+                                             (hitl-plan-registered-domains)))))))))
+
+(ert-deftest orgx-bulk-skips-satisfied-on-create-and-add-op-test ()
+  (orgx-bulk-test--with-env f "* DONE Alpha\n* TODO Beta\n"
+    (let* ((targets (list (list :file f :heading "Alpha" :todo-state "DONE")
+                          (list :file f :heading "Beta" :todo-state "TODO")))
+           (plan (orgx-bulk-create-plan :targets targets :ops '((todo-state "DONE")))))
+      (should (equal '(skipped pending)
+                     (mapcar #'hitl-plan-step-status (hitl-plan-steps plan))))
+      (hitl-plan-add-op plan '(todo-state "DONE") targets)
+      (should (equal '(skipped pending)
+                     (mapcar #'hitl-plan-step-status
+                             (last (hitl-plan-steps plan) 2)))))))
+
+(ert-deftest orgx-bulk-domain-registration-test ()
+  ;; Unresolvable targets use the domain's status; no orgx-side special case.
+  (let ((domain (hitl-plan-get-domain 'org-agenda)))
+    (should (eq (hitl-plan-domain-unresolved-status domain) 'missing))
+    (should (stringp (hitl-plan-domain-unresolved-message domain)))
+    (should (hitl-plan-domain-accept-buffer domain))
+    (should (orgx-bulk-op-spec-builtin-oab (hitl-plan-get-op 'org-agenda 'todo-state)))
+    (should-not (orgx-bulk-op-spec-builtin-oab (hitl-plan-get-op 'org-agenda 'property-set)))))
 
 ;;; Target Resolution
 
@@ -181,8 +262,7 @@
          (orgx-bulk-register-op 'test-custom-op-2
            :key ?Z
            :apply #'ignore)))
-    (remhash 'test-custom-op-1 orgx-bulk--op-registry)
-    (remhash ?Z orgx-bulk--oab-owned-keys)
+    (remhash (cons 'org-agenda 'test-custom-op-1) hitl-plan--op-registry)
     (setq org-agenda-bulk-custom-functions
           (assq-delete-all ?Z org-agenda-bulk-custom-functions))))
 
@@ -196,12 +276,12 @@
                   :targets targets
                   :ops '((todo-state "DONE")))))
       ;; Third step is already DONE -> automatically marked `skipped'.
-      (should (eq (orgx-bulk-step-status (nth 2 (orgx-bulk-plan-steps plan))) 'skipped))
+      (should (eq (hitl-plan-step-status (nth 2 (hitl-plan-steps plan))) 'skipped))
       ;; Manually skip the first step.
-      (setf (orgx-bulk-step-status (nth 0 (orgx-bulk-plan-steps plan))) 'skipped)
+      (setf (hitl-plan-step-status (nth 0 (hitl-plan-steps plan))) 'skipped)
       (orgx-bulk-execute plan)
       (should (equal (orgx-bulk-test--states f) '("TODO" "DONE" "DONE")))
-      (should (eq (orgx-bulk-plan-status plan) 'complete))
+      (should (eq (hitl-plan-status plan) 'complete))
       (should-error (orgx-bulk-execute plan) :type 'user-error))))
 
 (ert-deftest orgx-bulk-execute-quit-and-resume-test ()
@@ -219,19 +299,19 @@
                      (when (= calls 1)
                        (signal 'quit nil))))))
         (orgx-bulk-execute plan))
-      (should (eq (orgx-bulk-plan-status plan) 'paused))
-      (should (equal (mapcar #'orgx-bulk-step-status (orgx-bulk-plan-steps plan))
+      (should (eq (hitl-plan-status plan) 'paused))
+      (should (equal (mapcar #'hitl-plan-step-status (hitl-plan-steps plan))
                      '(done pending pending)))
       (should (equal (orgx-bulk-test--states f) '("DONE" "TODO" "TODO")))
       ;; Reload from disk and resume execution: only remaining pending steps run.
-      (let ((reloaded (orgx-bulk-load (orgx-bulk-plan-id plan)))
+      (let ((reloaded (orgx-bulk-load (hitl-plan-id plan)))
             (resumed-headings nil))
         (let ((orgx-bulk-step-functions
                (list (lambda (step _plan)
-                       (push (plist-get (orgx-bulk-step-target step) :heading)
+                       (push (plist-get (hitl-plan-step-target step) :heading)
                              resumed-headings)))))
           (orgx-bulk-execute reloaded))
-        (should (eq (orgx-bulk-plan-status reloaded) 'complete))
+        (should (eq (hitl-plan-status reloaded) 'complete))
         (should (equal (nreverse resumed-headings) '("Two" "Three")))
         (should (equal (orgx-bulk-test--states f) '("DONE" "DONE" "DONE")))))))
 
@@ -249,9 +329,9 @@
         (delete-region (line-beginning-position) (point-max))
         (save-buffer))
       (orgx-bulk-execute plan)
-      (should (equal (mapcar #'orgx-bulk-step-status (orgx-bulk-plan-steps plan))
+      (should (equal (mapcar #'hitl-plan-step-status (hitl-plan-steps plan))
                      '(done missing)))
-      (should (eq (orgx-bulk-plan-status plan) 'complete)))
+      (should (eq (hitl-plan-status plan) 'complete)))
     ;; Unknown operation marks step `failed' without aborting.
     (let* ((targets (orgx-bulk-test--targets f))
            (bad-plan (orgx-bulk-create-plan
@@ -259,7 +339,7 @@
                       :targets targets
                       :ops '((nonexistent-op "arg")))))
       (orgx-bulk-execute bad-plan)
-      (should (eq (orgx-bulk-step-status (car (orgx-bulk-plan-steps bad-plan))) 'failed)))))
+      (should (eq (hitl-plan-step-status (car (hitl-plan-steps bad-plan))) 'failed)))))
 
 (ert-deftest orgx-bulk-hooks-and-denote-sync-test ()
   (orgx-bulk-test--with-env f "#+execution_status: in-progress\n* TODO TaskA\n* TODO TaskB\n"
@@ -279,6 +359,56 @@
           (orgx-bulk-execute plan2)
           (should (string-match-p "^#\\+execution_status: complete"
                                   (with-temp-buffer (insert-file-contents f) (buffer-string)))))))))
+
+;;; Review follow-ups
+
+(ert-deftest orgx-bulk-plan-ids-are-hitl-ids-test ()
+  (orgx-bulk-test--with-env f "* TODO Alpha\n"
+    (let ((plan (orgx-bulk-create-plan
+                 :scope (list :type 'files :files (list f))
+                 :targets (orgx-bulk-test--targets f) :ops '((todo-state "DONE")))))
+      (should (string-match-p "\\`plan-[0-9]\\{8\\}-[0-9]\\{6\\}-[0-9a-f]\\{4\\}\\'"
+                              (hitl-plan-id plan)))
+      (should (file-exists-p (hitl-plan-file (hitl-plan-id plan) orgx-bulk-directory)))
+      (should (equal (file-name-as-directory orgx-bulk-directory)
+                     (file-name-as-directory (hitl-plan-directory plan)))))))
+
+(ert-deftest orgx-bulk-plan-directory-follows-domain-on-load-and-add-op-test ()
+  "No per-call directory fix-ups: create, add-op, discard and reload agree."
+  (orgx-bulk-test--with-env f "* TODO Alpha\n"
+    (let* ((plan (orgx-bulk-create-plan
+                  :scope (list :type 'files :files (list f))
+                  :targets (orgx-bulk-test--targets f) :ops '((todo-state "DONE"))))
+           (id (hitl-plan-id plan)))
+      (hitl-plan-add-op plan '(tag-add "x"))
+      (should (= 1 (length (directory-files orgx-bulk-directory nil "\\.eld\\'"))))
+      (clrhash hitl-plan--store)
+      (let ((loaded (orgx-bulk-get-plan id)))
+        (should loaded)
+        (should (equal (file-name-as-directory orgx-bulk-directory)
+                       (file-name-as-directory (hitl-plan-directory loaded))))
+        (orgx-bulk-discard loaded)
+        (should (eq 'discarded (hitl-plan-status
+                                (hitl-plan-load (hitl-plan-file id orgx-bulk-directory)))))))))
+
+(ert-deftest orgx-bulk-load-id-versus-file-test ()
+  (orgx-bulk-test--with-env f "* TODO Alpha\n"
+    (let* ((plan (orgx-bulk-create-plan
+                  :scope (list :type 'files :files (list f))
+                  :targets (orgx-bulk-test--targets f) :ops '((todo-state "DONE"))))
+           (id (hitl-plan-id plan))
+           (file (hitl-plan-file id orgx-bulk-directory)))
+      ;; A bare ID, an absolute path and a `.eld' name all load the plan.
+      (should (equal id (hitl-plan-id (orgx-bulk-load id))))
+      (should (equal id (hitl-plan-id (orgx-bulk-load file))))
+      ;; A relative `.eld' name is a file, resolved from `default-directory'.
+      (let ((default-directory (file-name-as-directory orgx-bulk-directory)))
+        (should (equal id (hitl-plan-id (orgx-bulk-load (concat id ".eld"))))))
+      (should-error (orgx-bulk-load (concat id ".eld")))
+      ;; A relative path without `.eld' is an ID, never a file: no cwd lookup.
+      (let ((default-directory temporary-file-directory))
+        (should (equal id (hitl-plan-id (orgx-bulk-load id)))))
+      (should-error (orgx-bulk-load "no-such-plan")))))
 
 (provide 'orgx-bulk-test)
 ;;; orgx-bulk-test.el ends here

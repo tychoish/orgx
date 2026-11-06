@@ -27,6 +27,7 @@
 (require 'org)
 (require 'org-refile)
 (require 'org-archive)
+(require 'hitl-plan)
 (require 'orgx-bulk)
 
 (defvar org-todo-keywords-1)
@@ -39,8 +40,94 @@
 (defvar org-log-redeadline)
 (defvar org-log-refile)
 (defvar org-refile-allow-creating-parent-nodes)
+(defvar org-special-properties)
+(defvar org-tag-re)
+(defvar org-archive-location)
+(declare-function org-archive--compute-location "org-archive")
 
 (declare-function org-block-todo-from-children-or-siblings-or-parent "org")
+
+;;; Validation helpers (agent-supplied arguments are untrusted)
+
+(defun orgx-bulk-ops--validate-tag (tag)
+  "Return a problem string if TAG is not one single valid Org tag, or nil.
+The whole string must match `org-tag-re': no whitespace, colons or newlines,
+which could otherwise inject text into the heading line or the buffer."
+  (cond ((not (stringp tag)) "tag must be a string")
+        ((string-empty-p tag) "empty tag")
+        ((not (string-match-p (concat "\\`" org-tag-re "\\'") tag))
+         (format "invalid tag %S" (truncate-string-to-width tag 40 nil nil "...")))))
+
+(defconst orgx-bulk-ops--mcp-denied-properties
+  '("ARCHIVE" "CATEGORY" "ID" "COLUMNS" "LOGGING" "STYLE")
+  "Properties MCP-origin plans may not set, besides the special ones.
+ARCHIVE redirects where subtrees are written, ID hijacks heading lookups
+by duplicating a real one, CATEGORY and COLUMNS
+change how entries display, and LOGGING and STYLE change behavior.  Names
+starting with EXPORT_ or header-args, and `org-special-properties', are
+denied as well.")
+
+(defun orgx-bulk-ops--denied-property-p (name)
+  "Return non-nil if MCP-origin plans may not set property NAME."
+  (let ((up (upcase (replace-regexp-in-string "\\+\\'" "" name))))
+    (or (member up orgx-bulk-ops--mcp-denied-properties)
+        (member up (mapcar #'upcase org-special-properties))
+        (string-prefix-p "EXPORT_" up)
+        (string-prefix-p "HEADER-ARGS" up)
+        (string-prefix-p "ARCHIVE" up))))
+
+(defun orgx-bulk-ops--validate-property (prop val)
+  "Return a problem string if PROP or VAL cannot be set safely, or nil.
+A name must be one word without colons; a value must be one line.  For
+MCP-origin plans, special and dangerous properties are refused too (see
+`orgx-bulk-ops--mcp-denied-properties')."
+  (cond ((not (stringp prop)) "property name must be a string")
+        ((string-empty-p prop) "empty property name")
+        ((string-match-p "[[:space:]:[:cntrl:]]" prop)
+         "property name may not contain whitespace, colons or control characters")
+        ((and val (not (stringp val)) (not (numberp val)))
+         "property value must be a string")
+        ((string-match-p "[[:cntrl:]]" (format "%s" (or val "")))
+         "property value must be a single line without control characters")
+        ((and (hitl-plan-restricted-p) (orgx-bulk-ops--denied-property-p prop))
+         (format "property %s may not be set over MCP" (upcase prop)))))
+
+(defun orgx-bulk-ops--refile-loc-file (loc)
+  "Return the destination file named by refile location LOC."
+  (cond ((and (consp loc) (plistp loc)) (plist-get loc :file))
+        ((consp loc) (nth 1 loc))))
+
+(defun orgx-bulk-ops--validate-refile (loc)
+  "Return a problem string if refile location LOC is unacceptable, or nil.
+For MCP-origin plans LOC must be a well-formed plist naming an allowed file."
+  (when (hitl-plan-restricted-p)
+    (condition-case err
+        (progn
+          (unless (and (consp loc) (plistp loc))
+            (error "Refile location must be an object"))
+          (unless (and (or (null (plist-get loc :heading)) (stringp (plist-get loc :heading)))
+                       (or (null (plist-get loc :id)) (stringp (plist-get loc :id)))
+                       (or (null (plist-get loc :pos)) (integerp (plist-get loc :pos))))
+            (error "Invalid refile location"))
+          (orgx-bulk--check-file (plist-get loc :file))
+          nil)
+      (error (error-message-string err)))))
+
+(defun orgx-bulk-ops--check-archive-location ()
+  "Signal an error if archiving the subtree at point is not allowed.
+Only restricted (MCP-origin) plans are checked.  The ARCHIVE property in
+effect (the same one `org-archive-subtree' consults) must name an allowed
+file; without one the global `org-archive-location' is the user's own
+setting and only has to be local."
+  (when (hitl-plan-restricted-p)
+    (unless (fboundp 'org-archive--compute-location)
+      (error "Cannot verify the archive location"))
+    (let* ((prop (org-entry-get nil "ARCHIVE" 'inherit))
+           (file (car (org-archive--compute-location (or prop org-archive-location)))))
+      (if prop
+          (orgx-bulk--check-file file)
+        (unless (orgx-bulk--local-name-p file)
+          (error "Archive file must be local"))))))
 
 (defun orgx-bulk-ops--json-get (obj &rest keys)
   "Extract the first non-nil value for KEYS (symbols or strings) from OBJ."
@@ -68,20 +155,14 @@
 (defun orgx-bulk-ops--apply-todo-state (state)
   "Apply `todo-state' STATE to the heading at point honoring notes and blocking."
   (let* ((from-state (org-get-todo-state))
-         (plan orgx-bulk--active-plan)
-         (log-mode (if plan (orgx-bulk-plan-log-notes plan) orgx-bulk-log-notes))
-         (step (and orgx-bulk--active-step-map
-                    (cdr (seq-find
-                          (lambda (cell)
-                            (let ((m (car cell)))
-                              (and (markerp m)
-                                   (eq (marker-buffer m) (current-buffer))
-                                   (= (marker-position m) (line-beginning-position)))))
-                          orgx-bulk--active-step-map))))
+         ;; `hitl-plan-run-step' binds the current plan and step.
+         (plan hitl-plan-current-plan)
+         (log-mode (if plan (hitl-plan-log-notes plan) orgx-bulk-log-notes))
+         (step hitl-plan-current-step)
          (note-text
           (pcase log-mode
-            ('one (and plan (orgx-bulk-plan-note plan)))
-            ('each (and step (orgx-bulk-step-note step)))
+            ('one (and plan (hitl-plan-note plan)))
+            ('each (and step (hitl-plan-step-note step)))
             (_ nil)))
          (org-inhibit-blocking orgx-bulk-inhibit-blocking)
          (org-inhibit-logging t)
@@ -177,9 +258,7 @@
   :queueable t
   :read-args (lambda ()
                (list (string-trim (read-string "Tag to add: "))))
-  :validate (lambda (tag)
-              (when (or (null tag) (string-empty-p tag))
-                "empty tag"))
+  :validate #'orgx-bulk-ops--validate-tag
   :apply (lambda (tag)
            (org-toggle-tag tag 'on))
   :describe (lambda (tag) (format "+%s" tag))
@@ -196,9 +275,7 @@
   :queueable t
   :read-args (lambda ()
                (list (string-trim (read-string "Tag to remove: "))))
-  :validate (lambda (tag)
-              (when (or (null tag) (string-empty-p tag))
-                "empty tag"))
+  :validate #'orgx-bulk-ops--validate-tag
   :apply (lambda (tag)
            (org-toggle-tag tag 'off))
   :describe (lambda (tag) (format "-%s" tag))
@@ -216,6 +293,7 @@
   :order-last t
   :read-args nil
   :apply (lambda (&rest _)
+           (orgx-bulk-ops--check-archive-location)
            (org-archive-subtree))
   :describe (lambda (&rest _) "archive")
   :from-json (lambda (_args) nil)
@@ -263,6 +341,8 @@
                                    (if (markerp p) (marker-position p) p)))))
          (id (and (plistp loc) (plist-get loc :id)))
          (path (and (plistp loc) (plist-get loc :outline-path))))
+    (when-let* ((problem (orgx-bulk-ops--validate-refile loc)))
+      (error "%s" problem))
     (unless (and file (file-exists-p file))
       (error "Refile target file does not exist: %S" file))
     (let* ((resolved (orgx-bulk--resolve-target
@@ -280,11 +360,12 @@
                         nil
                         dst-pos))
            (org-log-refile (if org-log-refile 'time nil)))
-      (org-refile nil nil rfloc)
+      (orgx-bulk--with-safe-visiting
+        (org-refile nil nil rfloc))
       ;; The source file is saved after execution; make sure the destination
       ;; is too, so the heading is never only in an unsaved buffer.
-      (when orgx-bulk-save-buffers
-        (with-current-buffer (find-file-noselect file)
+      (when hitl-plan-save-buffers
+        (with-current-buffer (orgx-bulk--visit file)
           (when (buffer-modified-p)
             (let ((inhibit-message t))
               (save-buffer))))))))
@@ -296,6 +377,7 @@
   :queueable t
   :order-last t
   :read-args #'orgx-bulk-ops--read-refile-args
+  :validate #'orgx-bulk-ops--validate-refile
   :apply #'orgx-bulk-ops--apply-refile
   :describe (lambda (loc)
               (let ((file (if (plistp loc) (plist-get loc :file) (nth 1 loc)))
@@ -351,16 +433,15 @@
 (orgx-bulk-register-op 'property-set
   :key ?P
   :label "property"
-  :builtin-oab nil
   :queueable t
   :read-args (lambda ()
                (let* ((prop (org-read-property-name))
                       (val (org-read-property-value prop)))
                  (list prop val)))
-  :validate (lambda (prop _val)
-              (when (or (null prop) (string-empty-p prop))
-                "empty property name"))
+  :validate #'orgx-bulk-ops--validate-property
   :apply (lambda (prop val)
+           (when-let* ((problem (orgx-bulk-ops--validate-property prop val)))
+             (error "%s" problem))
            (org-set-property prop (format "%s" (or val ""))))
   :describe (lambda (prop val)
               (format "%s=%s" prop (or val "")))

@@ -17,8 +17,7 @@
           (,file-var (make-temp-file "orgx-bulk-ops-" nil ".org" ,content))
           (org-todo-keywords '((sequence "TODO(t)" "INPROGRESS(p)" "|" "DONE(d@)" "CANCELED(c@)")))
           (org-agenda-files (list ,file-var))
-          (orgx-bulk--plans (make-hash-table :test #'equal))
-          (orgx-bulk--counter 0)
+          (hitl-plan--store (make-hash-table :test #'equal))
           (orgx-bulk-log-notes 'ignore)
           (orgx-bulk-inhibit-blocking nil))
      (unwind-protect
@@ -106,7 +105,7 @@
                   :ops '((archive-sibling)
                          (todo-state "DONE")
                          (tag-add "shipped")))))
-      (should (equal (mapcar #'orgx-bulk-op-name (orgx-bulk-plan-ops plan))
+      (should (equal (mapcar #'hitl-plan-op-name (hitl-plan-ops plan))
                      '(todo-state tag-add archive-sibling)))
       (orgx-bulk-execute plan)
       (let ((txt (with-temp-buffer (insert-file-contents f) (buffer-string))))
@@ -140,7 +139,7 @@
                                          :pos (plist-get bucket-target :pos)))
                              '(todo-state "INPROGRESS")))))
       ;; `refile' is ordered after `todo-state'.
-      (should (equal (mapcar #'orgx-bulk-op-name (orgx-bulk-plan-ops plan))
+      (should (equal (mapcar #'hitl-plan-op-name (hitl-plan-ops plan))
                      '(todo-state refile)))
       (orgx-bulk-execute plan)
       (with-current-buffer (find-file-noselect f)
@@ -162,7 +161,7 @@
                                                       :heading "Missing"
                                                       :pos 10))))))
             (orgx-bulk-execute plan)
-            (should (eq (orgx-bulk-step-status (car (orgx-bulk-plan-steps plan)))
+            (should (eq (hitl-plan-step-status (car (hitl-plan-steps plan)))
                         'failed))
             (with-current-buffer (find-file-noselect f)
               (should (equal (org-map-entries #'org-get-todo-state) '("TODO"))))
@@ -189,9 +188,9 @@
                                          (list :file dst
                                                :heading (file-name-nondirectory dst)))))))
             (orgx-bulk-execute plan)
-            (let ((step (car (orgx-bulk-plan-steps plan))))
-              (should (eq (orgx-bulk-step-status step) 'done))
-              (should (equal (plist-get (orgx-bulk-step-target step) :heading)
+            (let ((step (car (hitl-plan-steps plan))))
+              (should (eq (hitl-plan-step-status step) 'done))
+              (should (equal (plist-get (hitl-plan-step-target step) :heading)
                              "MoveMe")))
             (with-temp-buffer
               (insert-file-contents dst)
@@ -213,7 +212,7 @@
                   :ops '((todo-state "DONE")))))
       ;; Default (`orgx-bulk-inhibit-blocking' = nil): blocked step fails.
       (orgx-bulk-execute plan)
-      (should (eq (orgx-bulk-step-status (car (orgx-bulk-plan-steps plan))) 'failed))
+      (should (eq (hitl-plan-step-status (car (hitl-plan-steps plan))) 'failed))
       ;; With `orgx-bulk-inhibit-blocking' = t: blocked step succeeds.
       (let ((orgx-bulk-inhibit-blocking t)
             (plan2 (orgx-bulk-create-plan
@@ -221,14 +220,14 @@
                     :targets (list parent-target)
                     :ops '((todo-state "DONE")))))
         (orgx-bulk-execute plan2)
-        (should (eq (orgx-bulk-step-status (car (orgx-bulk-plan-steps plan2))) 'done))))))
+        (should (eq (hitl-plan-step-status (car (hitl-plan-steps plan2))) 'done))))))
 
 (ert-deftest orgx-bulk-ops-todo-state-repeater-test ()
   ;; A repeating task reverts to TODO after DONE; that is success, not "blocked".
   (orgx-bulk-ops-test--with-env f "* TODO Rep\nSCHEDULED: <2026-01-01 Thu +1d>\n"
     (let ((plan (orgx-bulk-ops-test--run f '((todo-state "DONE")))))
-      (should (eq (orgx-bulk-step-status (car (orgx-bulk-plan-steps plan))) 'done))
-      (should (eq (orgx-bulk-plan-status plan) 'complete))
+      (should (eq (hitl-plan-step-status (car (hitl-plan-steps plan))) 'done))
+      (should (eq (hitl-plan-status plan) 'complete))
       (with-temp-buffer
         (insert-file-contents f)
         (should-not (string-match-p "<2026-01-01" (buffer-string)))))))
@@ -268,7 +267,7 @@
       ;; Pre-populate first step's note (simulating a resumed plan that already
       ;; collected the note for Alpha before pausing) and verify `read-string'
       ;; is only called once (for Beta).
-      (setf (orgx-bulk-step-note (car (orgx-bulk-plan-steps plan)))
+      (setf (hitl-plan-step-note (car (hitl-plan-steps plan)))
             "Pre-existing note for Alpha")
       (cl-letf (((symbol-function 'read-string)
                  (lambda (_prompt &rest _)
