@@ -3,7 +3,7 @@
 ;; Author: tychoish <tychoish@tychoish.com>
 ;; URL: https://github.com/tychoish/orgx
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1") (org "9.6") (annotated-completing-read "0.1") (mcpkit "0.1.0"))
+;; Package-Requires: ((emacs "29.1") (org "9.6") (annotated-completing-read "0.1") (mcpkit "0.1.0") (hitl "0.1.0"))
 ;; Keywords: org, convenience
 
 ;;; Commentary:
@@ -14,6 +14,9 @@
 ;; - Archive management and completed task refiling
 ;; - Minor mode (`orgx-mode') with unified keymap under `C-c o'
 ;; - Global keymap (`orgx-global-map')
+;;
+;; Bulk plans are `hitl-plan' plans (the `hitl' package).  `agent-shell-queue'
+;; is an optional dependency, used only by `orgx-bulk-asq'.
 
 ;;; Code:
 
