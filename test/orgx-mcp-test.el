@@ -31,8 +31,8 @@ Signal an error carrying the handler's error message on failure."
   `(let* ((orgx-bulk-directory (make-temp-file "orgx-mcp-bulk-dir-" t))
           (,var (make-temp-file "orgx-mcp-" nil ".org" ,content))
           (org-todo-keywords '((sequence "TODO" "|" "DONE" "CANCELED")))
-          (orgx-bulk--plans (make-hash-table :test #'equal))
-          (orgx-bulk--counter 0)
+          (hitl-plan--store (make-hash-table :test #'equal))
+          (orgx-bulk-mcp-allowed-files (list ,var))
           (orgx-bulk-log-notes 'ignore))
      (unwind-protect
          (cl-letf (((symbol-function 'display-buffer) #'ignore))
@@ -45,7 +45,7 @@ Signal an error carrying the handler's error message on failure."
                         (equal (expand-file-name (buffer-file-name buf))
                                (expand-file-name ,var)))
                    (string-prefix-p "*Org Agenda" (buffer-name buf))
-                   (string-prefix-p "*orgx-bulk:" (buffer-name buf)))
+                   (string-prefix-p "*hitl-plan:" (buffer-name buf)))
            (with-current-buffer buf (set-buffer-modified-p nil))
            (kill-buffer buf)))
        (when (file-exists-p ,var)
@@ -133,13 +133,17 @@ Signal an error carrying the handler's error message on failure."
     (let ((reviewed nil)
           (org-agenda-files (list f)))
       (cl-letf (((symbol-function 'orgx-bulk-review) (lambda (plan &rest _) (push plan reviewed))))
-        ;; Reject `each' log_notes over MCP.
-        (should-error
-         (orgx-mcp-test--call
-          "bulk_plan_create"
-          (list :files (vector f)
-                :ops (vector '(:op "todo-state" :args (:state "DONE")))
-                :log_notes "each")))
+        ;; Reject `each' log_notes over MCP (hitl reports failures as (:error MSG)).
+        (should (string-match-p
+                 "each"
+                 (plist-get
+                  (orgx-mcp-test--call
+                   "bulk_plan_create"
+                   (list :files (vector f)
+                         :ops (vector '(:op "todo-state" :args (:state "DONE")))
+                         :log_notes "each"))
+                  :error)))
+        (should (null (orgx-bulk-list-plans)))
         ;; Create plan with explicit files scope.
         (let ((s (orgx-mcp-test--call
                   "bulk_plan_create"
@@ -154,6 +158,25 @@ Signal an error carrying the handler's error message on failure."
           (should (= (length reviewed) 1))
           (let ((listed (orgx-mcp-test--call "bulk_plan_list" '(:status "draft"))))
             (should (= (length (plist-get listed :plans)) 1))))))))
+
+(ert-deftest orgx-mcp-bulk-plan-create-show-false-test ()
+  ;; mcpkit parses JSON false as nil; explicit false must suppress review.
+  (orgx-mcp-test--with-file f "* TODO a\n"
+    (let ((reviewed nil)
+          (org-agenda-files (list f)))
+      (cl-letf (((symbol-function 'orgx-bulk-review) (lambda (plan &rest _) (push plan reviewed))))
+        (dolist (show '(nil :json-false))
+          (orgx-mcp-test--call
+           "bulk_plan_create"
+           (list :files (vector f)
+                 :ops (vector '(:op "todo-state" :args (:state "DONE")))
+                 :show show)))
+        (should-not reviewed)
+        (orgx-mcp-test--call
+         "bulk_plan_create"
+         (list :files (vector f)
+               :ops (vector '(:op "todo-state" :args (:state "DONE")))))
+        (should (= 1 (length reviewed)))))))
 
 (ert-deftest orgx-mcp-bulk-status-discard-and-execute-test ()
   (orgx-mcp-test--with-file f "* TODO a\n* TODO b\n* TODO c\n"
@@ -190,13 +213,113 @@ Signal an error carrying the handler's error message on failure."
 (ert-deftest orgx-mcp-bulk-plan-create-one-requires-message-test ()
   ;; `one' without a note would make execution prompt inside the handler.
   (orgx-mcp-test--with-file f "* TODO a\n"
-    (should-error
-     (orgx-mcp-test--call
-      "bulk_plan_create"
-      (list :files (vector f)
-            :ops (vector '(:op "todo-state" :args (:state "DONE")))
-            :log_notes "one"
-            :show :json-false)))))
+    (should (string-match-p
+             "note"
+             (plist-get
+              (orgx-mcp-test--call
+               "bulk_plan_create"
+               (list :files (vector f)
+                     :ops (vector '(:op "todo-state" :args (:state "DONE")))
+                     :log_notes "one"
+                     :show :json-false))
+              :error)))
+    (should (null (orgx-bulk-list-plans)))))
+
+(ert-deftest orgx-mcp-bulk-tools-delegate-to-hitl-scoped-to-org-agenda-test ()
+  (orgx-mcp-test--with-file f "* TODO a\n* DONE b\n"
+    (let* ((created (orgx-mcp-test--call
+                     "bulk_plan_create"
+                     (list :files (vector f) :from_states ["TODO" "DONE"]
+                           :ops (vector '(:op "todo-state" :args (:state "DONE")))
+                           :show :json-false)))
+           (id (plist-get created :plan_id))
+           (other (hitl-plan-create :domain 'file-target :save nil
+                                    :targets (list (list :file f :line 1))
+                                    :ops '(todo-state))))
+      (should (hitl-plan-p other))
+      ;; Created through `plan_create' as an `org-agenda' plan stored in
+      ;; `orgx-bulk-directory'; the already-DONE heading is skipped.
+      (should (equal (plist-get created :domain) "org-agenda"))
+      (should (file-exists-p (hitl-plan-file id orgx-bulk-directory)))
+      (should (equal (mapcar (lambda (s) (plist-get s :status))
+                             (plist-get created :steps))
+                     '("pending" "skipped")))
+      ;; `bulk_plan_list' shows only `org-agenda' plans, even after a restart.
+      (clrhash hitl-plan--store)
+      (should (equal (mapcar (lambda (p) (plist-get p :plan_id))
+                             (plist-get (orgx-mcp-test--call "bulk_plan_list" nil) :plans))
+                     (list id)))
+      ;; Unknown plans are reported in hitl's (:error MSG) shape.
+      (should (plist-get (orgx-mcp-test--call "bulk_plan_status" '(:plan_id "nope")) :error))
+      (should (equal (plist-get (orgx-mcp-test--call "bulk_ops" nil) :domain) "org-agenda")))))
+
+;;; Review follow-ups
+
+(defun orgx-mcp-test--agenda-buffers ()
+  "Return the live agenda buffers."
+  (seq-filter (lambda (b) (string-prefix-p "*Org Agenda" (buffer-name b))) (buffer-list)))
+
+(ert-deftest orgx-mcp-bulk-plan-list-reports-errors-test ()
+  "`bulk_plan_list' returns hitl's result, including its (:error MSG)."
+  (orgx-mcp-test--with-file f "* TODO a\n"
+    (should (string-match-p
+             "not allowed"
+             (plist-get (orgx-mcp-test--call "bulk_plan_list" '(:directory "/definitely/not/a/store"))
+                        :error)))
+    (should (equal [] (plist-get (orgx-mcp-test--call "bulk_plan_list" nil) :plans)))))
+
+(ert-deftest orgx-mcp-bulk-plan-create-leaves-no-agenda-buffers-test ()
+  "Building targets from a scope does not leave sticky agenda buffers behind."
+  (orgx-mcp-test--with-file f "* TODO a\n* TODO b\n"
+    (let ((before (orgx-mcp-test--agenda-buffers)))
+      (let ((res (orgx-mcp-test--call
+                  "bulk_plan_create"
+                  (list :files (vector f)
+                        :ops (vector '(:op "todo-state" :args (:state "DONE")))
+                        :show :json-false))))
+        (should-not (plist-get res :error))
+        (should (= 2 (length (plist-get res :steps)))))
+      (should (equal before (orgx-mcp-test--agenda-buffers)))
+      ;; The plan still executes: it rebuilds its own batch.
+      (let ((hitl-plan-agent-may-apply t)
+            (id (plist-get (car (append (plist-get (orgx-mcp-test--call "bulk_plan_list" nil)
+                                                   :plans)
+                                        nil))
+                           :plan_id)))
+        (should (equal "complete"
+                       (plist-get (orgx-mcp-test--call "bulk_plan_execute" (list :plan_id id))
+                                  :status)))
+        (with-current-buffer (find-file-noselect f)
+          (should (equal '("DONE" "DONE") (org-map-entries #'org-get-todo-state))))))))
+
+(ert-deftest orgx-mcp-bulk-plan-create-null-args-test ()
+  (orgx-mcp-test--with-file f "* TODO a\n"
+    (let ((res (orgx-mcp-test--call
+                "bulk_plan_create"
+                (list :files (vector f) :scope :null :match :null :from_states :null
+                      :buffer_name :null :log_notes :null :message :null :description :null
+                      :ops (vector '(:op "todo-state" :args (:state "DONE")))
+                      :show :json-false))))
+      (should-not (plist-get res :error))
+      (should (equal "draft" (plist-get res :status))))))
+
+(ert-deftest orgx-mcp-bulk-plan-execute-through-function-api-test ()
+  "With `hitl-plan-agent-may-apply' the function API executes and excludes."
+  (orgx-mcp-test--with-file f "* TODO a\n* TODO b\n"
+    (let* ((hitl-plan-agent-may-apply t)
+           (res (hitl-plan-mcp-create
+                 :domain "org-agenda" :show :json-false
+                 :scope (orgx-mcp--build-scope (list :files (vector f)))
+                 :ops (vector '(:op "todo-state" :args (:state "DONE")))))
+           (id (plist-get res :plan_id)))
+      (should-not (plist-get res :error))
+      (let ((done (hitl-plan-mcp-execute :domain "org-agenda" :plan_id id :exclude [2])))
+        (should (equal "complete" (plist-get done :status)))
+        (should (= 1 (plist-get (plist-get done :counts) :skipped))))
+      (with-current-buffer (find-file-noselect f)
+        (should (equal '("DONE" "TODO") (org-map-entries #'org-get-todo-state))))
+      (should (equal "excluded over MCP"
+                     (hitl-plan-step-message (nth 1 (hitl-plan-steps (hitl-plan-get id)))))))))
 
 (provide 'orgx-mcp-test)
 ;;; orgx-mcp-test.el ends here

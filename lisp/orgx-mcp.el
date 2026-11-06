@@ -11,16 +11,19 @@
 ;; Capture (into agentic.org):
 ;; - `org_capture_task', `org_capture_journal', `org_capture_clock_in'.
 ;;
-;; Bulk operations (see `orgx-bulk'):
-;; - `bulk_ops': list registered bulk operations with their argument schemas.
-;; - `bulk_plan_create': build and save a bulk plan and open its plan buffer.
-;; - `bulk_plan_list': list saved bulk plans (optionally filtered by status).
-;; - `bulk_plan_status': read a plan and its step statuses back.
-;; - `bulk_plan_discard': mark a plan discarded and close its buffer.
-;; - `bulk_plan_execute': execute a plan when `orgx-mcp-agent-may-apply' is
-;;   non-nil; otherwise return `awaiting_user_confirmation'.
+;; Bulk operations (see `orgx-bulk'), as thin wrappers over the generic
+;; `hitl-plan-mcp' functions (`hitl-plan-mcp-ops', `-create', `-list',
+;; `-status', `-discard', `-execute'), scoped to the `org-agenda' domain
+;; and `orgx-bulk-directory':
+;; - `bulk_ops', `bulk_plan_create', `bulk_plan_list', `bulk_plan_status',
+;;   `bulk_plan_discard' and `bulk_plan_execute'.
 ;;
-;; Handlers never prompt: `each' log-notes mode is rejected over MCP.
+;; Only `bulk_plan_create' translates its arguments (orgx scope names and
+;; `message' become a `:scope' plist and a `:note'), and the other tools just
+;; add the domain and directory.  Hitl produces the results and the
+;; (:error MESSAGE) failures.  Handlers never prompt, the tools accept only
+;; `:queueable' operations, and `hitl-plan-agent-may-apply' (alias
+;; `orgx-mcp-agent-may-apply') gates execution.
 
 ;;; Code:
 
@@ -30,6 +33,8 @@
 (require 'subr-x)
 (require 'org-capture)
 (require 'mcpkit)
+(require 'hitl-plan)
+(require 'hitl-plan-mcp)
 (require 'orgx-bulk)
 (require 'orgx-bulk-ops)
 (require 'orgx-bulk-agenda)
@@ -53,20 +58,91 @@ Falls back to the \"t\" template, then to ~/org/agentic.org."
         (nth 3 default-entry)
       (list 'file (expand-file-name "~/org/agentic.org")))))
 
+(defconst orgx-mcp--capture-forbidden-body-regexp
+  (concat "^[ \t]*\\(?:#\\+begin_src\\|:PROPERTIES:\\|# Local Variables\\)"
+          "\\|^\\*+[ \t]")
+  "Body lines an agent may not capture.
+They would open a source block, add a property drawer, start a file-local
+variables block (which can run code), or start a new heading.")
+
+(defun orgx-mcp--capture-heading (heading)
+  "Return HEADING as a safe one-line string, or signal an error.
+HEADING must be a non-empty string.  Newlines and other control characters
+become spaces, so it cannot span or start lines."
+  (unless (stringp heading)
+    (error "`heading' must be a string"))
+  (when (> (length heading) hitl-plan-max-string-length)
+    (error "`heading' is too long (max %d characters)" hitl-plan-max-string-length))
+  (let ((clean (string-trim (replace-regexp-in-string "[[:cntrl:]]+" " " heading))))
+    (when (string-empty-p clean)
+      (error "`heading' is empty"))
+    clean))
+
+(defun orgx-mcp--capture-body (body)
+  "Return BODY (nil or a string) checked for safety, or signal an error.
+Multi-line text is fine, but no line may start a heading, a source block, a
+property drawer or a file-local variables block."
+  (cond
+   ((null body) nil)
+   ((not (stringp body)) (error "`body' must be a string"))
+   ((> (length body) (* 8 hitl-plan-max-string-length))
+    (error "`body' is too long"))
+   (t
+    (let ((text (replace-regexp-in-string "\r\n?" "\n" body)))
+      (when (string-match-p "[\0-\10\13\14\16-\37\177]" text)
+        (error "`body' contains control characters"))
+      (let ((case-fold-search t))
+        (when (string-match-p orgx-mcp--capture-forbidden-body-regexp text)
+          (error "`body' may not contain lines starting a heading, source block, property drawer or local-variables block")))
+      text))))
+
 (defun orgx-mcp-capture-run (target heading &optional body-str clock-in-p)
-  "Capture HEADING and BODY-STR at TARGET, clocking in if CLOCK-IN-P."
-  (let* ((timestamp (format-time-string "[%Y-%m-%d %a %H:%M]"))
-         (content (concat "** " heading "\n"
+  "Capture HEADING and BODY-STR at TARGET, clocking in if CLOCK-IN-P.
+HEADING and BODY-STR come from an untrusted agent: they are validated (see
+`orgx-mcp--capture-heading' and `orgx-mcp--capture-body') and are never
+part of the capture template, whose `%'-escapes can evaluate Lisp.  The
+template holds inert placeholders that are replaced by the literal text
+just before the entry is finalized."
+  (let* ((heading (orgx-mcp--capture-heading heading))
+         (body-str (orgx-mcp--capture-body body-str))
+         (timestamp (format-time-string "[%Y-%m-%d %a %H:%M]"))
+         (token (md5 (format "%s%s%s" (random) (float-time) (emacs-pid))))
+         (h-token (concat "ORGXHEADING" token))
+         (b-token (concat "ORGXBODY" token))
+         (has-body (and body-str (not (string-empty-p body-str))))
+         (content (concat "** " h-token "\n"
                           ":PROPERTIES:\n:CREATED:  " timestamp "\n:END:\n"
-                          (if (and body-str (not (string-empty-p body-str)))
-                              (concat body-str "\n")
-                            "")))
-         (org-capture-templates
-          `(("_" "" entry ,target ,content
-             :immediate-finish t :kill-buffer t :prepend t
-             :clock-in ,(if clock-in-p t nil)))))
-    (save-window-excursion
-      (org-capture nil "_"))))
+                          (if has-body (concat b-token "\n") "")))
+         (fill (lambda ()
+                 (save-excursion
+                   (save-restriction
+                     (widen)
+                     (dolist (pair `((,h-token . ,heading) (,b-token . ,body-str)))
+                       (goto-char (point-min))
+                       (when (and (cdr pair) (search-forward (car pair) nil t))
+                         (replace-match (cdr pair) t t))))))))
+    (let ((org-capture-templates
+           `(("_" "" entry ,target ,content
+              :immediate-finish t :kill-buffer t :prepend t
+              :clock-in ,(if clock-in-p t nil))))
+          (org-capture-before-finalize-hook
+           (cons fill org-capture-before-finalize-hook)))
+      (save-window-excursion
+        (org-capture nil "_")))))
+
+(defun orgx-mcp--capture-tool (args keys target-name clock-in-p add-todo)
+  "Run a capture tool for ARGS, returning its result plist or (:error MSG).
+KEYS selects the template target; TARGET-NAME labels the result; CLOCK-IN-P
+clocks in; ADD-TODO prefixes \"TODO \" when missing."
+  (hitl-plan-mcp--guard
+    (let ((heading (orgx-mcp--capture-heading (plist-get args :heading)))
+          (body (orgx-mcp--capture-body (plist-get args :body))))
+      (when (and add-todo (not (string-prefix-p "TODO " heading)))
+        (setq heading (concat "TODO " heading)))
+      (if clock-in-p
+          (orgx-mcp-capture-run (orgx-mcp-capture-target keys) heading body t)
+        (orgx-mcp-capture-run (orgx-mcp-capture-target keys) heading body))
+      (list :status "ok" :target target-name :heading heading))))
 
 (mcpkit-register-tool 'org_capture_task 'orgx
   :description "Capture a task heading and optional body to the Tasks section of agentic.org."
@@ -74,11 +150,7 @@ Falls back to the \"t\" template, then to ~/org/agentic.org."
                   :properties (:heading (:type "string" :description "Task heading (with or without TODO)")
                                :body (:type "string" :description "Optional task body text"))
                   :required ["heading"])
-  (let ((heading (plist-get args :heading)))
-    (unless (string-prefix-p "TODO " heading)
-      (setq heading (concat "TODO " heading)))
-    (orgx-mcp-capture-run (orgx-mcp-capture-target '("att" "at")) heading (plist-get args :body))
-    (list :status "ok" :target "task" :heading heading)))
+  (orgx-mcp--capture-tool args '("att" "at") "task" nil t))
 
 (mcpkit-register-tool 'org_capture_journal 'orgx
   :description "Capture a journal entry heading and optional body to today's Journal datetree in agentic.org."
@@ -86,9 +158,7 @@ Falls back to the \"t\" template, then to ~/org/agentic.org."
                   :properties (:heading (:type "string" :description "Journal entry heading")
                                :body (:type "string" :description "Optional journal entry body text"))
                   :required ["heading"])
-  (let ((heading (plist-get args :heading)))
-    (orgx-mcp-capture-run (orgx-mcp-capture-target '("ajj" "aj")) heading (plist-get args :body))
-    (list :status "ok" :target "journal" :heading heading)))
+  (orgx-mcp--capture-tool args '("ajj" "aj") "journal" nil nil))
 
 (mcpkit-register-tool 'org_capture_clock_in 'orgx
   :description "Capture a task heading and body to agentic.org and immediately clock into it."
@@ -96,107 +166,87 @@ Falls back to the \"t\" template, then to ~/org/agentic.org."
                   :properties (:heading (:type "string" :description "Task heading to clock in")
                                :body (:type "string" :description "Optional body text"))
                   :required ["heading"])
-  (let ((heading (plist-get args :heading)))
-    (unless (string-prefix-p "TODO " heading)
-      (setq heading (concat "TODO " heading)))
-    (orgx-mcp-capture-run (orgx-mcp-capture-target '("att" "at")) heading (plist-get args :body) t)
-    (list :status "ok" :target "clock-in" :heading heading)))
+  (orgx-mcp--capture-tool args '("att" "at") "clock-in" t t))
 
 ;;; Bulk Operations
 
-(defcustom orgx-mcp-agent-may-apply nil
+(defvaralias 'orgx-mcp-agent-may-apply 'hitl-plan-agent-may-apply
   "When non-nil, `bulk_plan_execute' executes plans without user confirmation.
-Otherwise it reports `awaiting_user_confirmation' with the plan buffer name."
-  :type 'boolean
-  :group 'orgx-bulk)
-
-(defun orgx-mcp--plan (args)
-  "Return the plan named by ARGS' `:plan_id', or signal an error."
-  (let ((id (plist-get args :plan_id)))
-    (or (orgx-bulk-get-plan id)
-        (error "Unknown plan: %s" id))))
-
-(defun orgx-mcp--parse-log-notes (raw)
-  "Validate and convert RAW log_notes string/symbol into `ignore' or `one'.
-Rejects `each' over MCP because handlers must never prompt."
-  (let ((sym (cond
-              ((null raw) orgx-bulk-log-notes)
-              ((symbolp raw) raw)
-              ((stringp raw) (intern (downcase raw)))
-              (t (error "Invalid log_notes value: %S" raw)))))
-    (when (eq sym 'each)
-      (error "Log_notes mode `each' is not supported over MCP"))
-    (unless (memq sym '(ignore one))
-      (error "Unsupported log_notes mode: %s" sym))
-    sym))
-
-(defun orgx-mcp--parse-op (op-entry)
-  "Convert JSON OP-ENTRY (`{:op NAME, :args ...}') into an `orgx-bulk-op'."
-  (let* ((raw-name (or (orgx-bulk-ops--json-get op-entry 'op 'name)
-                       (error "Missing `op' in operation entry: %S" op-entry)))
-         (op-sym (if (symbolp raw-name) raw-name (intern (format "%s" raw-name))))
-         (spec (orgx-bulk-get-op op-sym))
-         (raw-args (orgx-bulk-ops--json-get op-entry 'args))
-         (parsed-args
-          (cond
-           ((null raw-args) nil)
-           ((and spec (orgx-bulk-op-spec-from-json spec)
-                 (or (plistp raw-args) (hash-table-p raw-args)
-                     (and (consp raw-args) (consp (car raw-args)))))
-            (funcall (orgx-bulk-op-spec-from-json spec) raw-args))
-           ((vectorp raw-args) (append raw-args nil))
-           ((listp raw-args) raw-args)
-           (t (list raw-args)))))
-    (orgx-bulk-op--create :name op-sym :args parsed-args)))
+Otherwise it reports `awaiting_user_confirmation' and opens the review buffer.")
 
 (defun orgx-mcp--build-scope (args)
-  "Construct an `orgx-bulk' scope plist from MCP ARGS."
-  (let* ((files (append (plist-get args :files) nil))
+  "Construct an `org-agenda' scope plist from `bulk_plan_create' ARGS."
+  (let* ((files (let ((raw (plist-get args :files)))
+                  (unless (or (null raw) (proper-list-p raw) (vectorp raw))
+                    (error "`files' must be an array of strings"))
+                  (append raw nil)))
          (scope-str (or (plist-get args :scope)
                         (if files "files" "agenda_files")))
          (match (plist-get args :match))
-         (from-states (append (plist-get args :from_states) nil))
-         (buf-name (plist-get args :buffer_name))
+         (from-states (let ((raw (plist-get args :from_states)))
+                        (unless (or (null raw) (proper-list-p raw) (vectorp raw))
+                          (error "`from_states' must be an array of strings"))
+                        (append raw nil)))
+         (_ (progn
+              (unless (stringp scope-str) (error "`scope' must be a string"))
+              (unless (cl-every #'stringp files) (error "`files' must be an array of strings"))
+              (unless (cl-every #'stringp from-states)
+                (error "`from_states' must be an array of strings"))
+              (unless (or (null match) (stringp match)) (error "`match' must be a string"))
+              (let ((bn (plist-get args :buffer_name)))
+                (unless (or (null bn) (stringp bn)) (error "`buffer_name' must be a string")))))
          (scope-type
           (pcase scope-str
             ("files" 'files)
-            ("agenda_files" 'agenda-files)
-            ("agenda-files" 'agenda-files)
-            ("denote" 'denote-files)
-            ("denote_files" 'denote-files)
+            ((or "agenda_files" "agenda-files") 'agenda-files)
+            ((or "denote" "denote_files") 'denote-files)
             ("agenda" 'agenda)
             (_ (error "Unknown bulk scope: %s" scope-str)))))
     (list :type scope-type
           :files (pcase scope-type
                    ('files files)
                    ('agenda-files (org-agenda-files))
-                   ('denote-files (orgx-denote-files))
-                   (_ nil))
-          :buffer-name buf-name
+                   ('denote-files (orgx-denote-files)))
+          :buffer-name (plist-get args :buffer_name)
           :match match
           :from-states from-states
           :only-open (and (null match) (null from-states)))))
+
+(defun orgx-mcp--create (args)
+  "Create a plan for `bulk_plan_create' ARGS through `hitl-plan-mcp-create'.
+The `org-agenda' domain stores the plan in `orgx-bulk-directory' and, like
+plans made by `orgx-bulk-create-plan', skips steps whose target is already
+in the requested state.  Like every MCP handler it returns (:error MESSAGE)
+rather than signalling.  The plan is origin `mcp' (untrusted); its review
+buffer is displayed without taking focus."
+  (hitl-plan-mcp--guard
+    (let* ((msg (or (plist-get args :message) (plist-get args :note)))
+           (show (hitl-plan-mcp-show-p args))
+           (result
+            (hitl-plan-mcp-create
+             :domain "org-agenda"
+             :scope (orgx-mcp--build-scope args)
+             :ops (plist-get args :ops)
+             :log_notes (plist-get args :log_notes)
+             :note msg
+             :description (or (plist-get args :description) msg)
+             :show :json-false)))
+      (when-let* (show
+                  ((not (plist-get result :error)))
+                  (plan (hitl-plan-get (plist-get result :plan_id))))
+        ;; Build the review buffer but never select it: the user may be typing.
+        (let ((buf (orgx-bulk-review plan nil)))
+          (when (bufferp buf)
+            (display-buffer buf '(nil (inhibit-same-window . t)))
+            (message "orgx: plan %s awaits your review in %s"
+                     (hitl-plan-id plan) (buffer-name buf)))))
+      result)))
 
 (mcpkit-register-tool 'bulk_ops 'orgx
   :description "List registered orgx-bulk operations with their keys, queueability, and argument schemas."
   :input-schema '(:type "object" :properties ())
   (ignore args)
-  (let ((ops (sort (copy-sequence (orgx-bulk-registered-ops))
-                   (lambda (a b)
-                     (string< (symbol-name (orgx-bulk-op-spec-name a))
-                              (symbol-name (orgx-bulk-op-spec-name b)))))))
-    (list :ops
-          (vconcat
-           (mapcar (lambda (spec)
-                     (list :name (symbol-name (orgx-bulk-op-spec-name spec))
-                           :key (if-let* ((k (orgx-bulk-op-spec-key spec)))
-                                    (char-to-string k)
-                                  :null)
-                           :label (or (orgx-bulk-op-spec-label spec) :null)
-                           :queueable (if (orgx-bulk-op-spec-queueable spec) t :json-false)
-                           :order_last (if (orgx-bulk-op-spec-order-last spec) t :json-false)
-                           :schema (vconcat (orgx-bulk-op-spec-schema spec))))
-                   ops)))))
+  (hitl-plan-mcp-ops :domain "org-agenda"))
 
 (mcpkit-register-tool 'bulk_plan_create 'orgx
   :description "Create and save a bulk operation plan over a scope and open its review buffer. Nothing is modified until executed."
@@ -216,95 +266,37 @@ Rejects `each' over MCP because handlers must never prompt."
                                :message (:type "string" :description "Note message (for log_notes=one) or plan description")
                                :show (:type "boolean" :description "Prepare/display the plan buffer (default true)"))
                   :required ["ops"])
-  (let* ((log-notes (orgx-mcp--parse-log-notes (plist-get args :log_notes)))
-         (raw-ops (append (plist-get args :ops) nil))
-         (_ (unless raw-ops (error "At least one operation in `ops' is required")))
-         (ops (mapcar #'orgx-mcp--parse-op raw-ops))
-         (msg (or (plist-get args :message) (plist-get args :note)))
-         (_ (when (and (eq log-notes 'one) (null msg))
-              (error "`message' is required when log_notes is `one'")))
-         (scope (orgx-mcp--build-scope args))
-         (batch (orgx-bulk-batch-for-scope scope))
-         (agenda-buf (car batch))
-         (targets (cdr batch))
-         (desc (or (plist-get args :description)
-                   (plist-get args :message)
-                   (format "MCP plan (%s)"
-                           (mapconcat #'orgx-bulk-describe-op ops ", "))))
-         (full-scope (plist-put (copy-sequence scope)
-                                :buffer-name (and (buffer-live-p agenda-buf)
-                                                  (buffer-name agenda-buf))))
-         (plan (orgx-bulk-create-plan
-                :scope full-scope
-                :targets targets
-                :ops ops
-                :description desc
-                :log-notes log-notes
-                :note (when (eq log-notes 'one) msg))))
-    (unless (eq (plist-get args :show) :json-false)
-      (orgx-bulk-review plan))
-    (orgx-bulk-plan-summary plan)))
+  (orgx-mcp--create args))
 
 (mcpkit-register-tool 'bulk_plan_list 'orgx
   :description "List saved orgx-bulk plans, optionally filtered by status."
   :input-schema '(:type "object"
                   :properties (:status (:type "string"
                                         :description "Optional status filter (draft, running, paused, complete, discarded)")))
-  (let* ((status-arg (plist-get args :status))
-         (statuses (cond
-                    ((null status-arg) nil)
-                    ((stringp status-arg) (list (intern status-arg)))
-                    ((or (vectorp status-arg) (listp status-arg))
-                     (mapcar (lambda (s) (if (symbolp s) s (intern s)))
-                             (append status-arg nil)))))
-         (plans (orgx-bulk-list-plans statuses)))
-    (list :plans (vconcat (mapcar #'orgx-bulk-plan-summary plans)))))
+  (apply #'hitl-plan-mcp-list :domain "org-agenda" args))
 
 (mcpkit-register-tool 'bulk_plan_status 'orgx
   :description "Return the current status and step details of a saved bulk plan."
   :input-schema '(:type "object"
                   :properties (:plan_id (:type "string"))
                   :required ["plan_id"])
-  (orgx-bulk-plan-summary (orgx-mcp--plan args)))
+  (apply #'hitl-plan-mcp-status :domain "org-agenda" args))
 
 (mcpkit-register-tool 'bulk_plan_discard 'orgx
   :description "Discard a bulk plan and close its review buffer if open."
   :input-schema '(:type "object"
                   :properties (:plan_id (:type "string"))
                   :required ["plan_id"])
-  (orgx-bulk-plan-summary (orgx-bulk-discard (orgx-mcp--plan args))))
+  (apply #'hitl-plan-mcp-discard :domain "org-agenda" args))
 
 (mcpkit-register-tool 'bulk_plan_execute 'orgx
-  :description "Execute a saved bulk plan when `orgx-mcp-agent-may-apply' is non-nil; otherwise return awaiting_user_confirmation."
+  :description "Execute a saved bulk plan when `orgx-mcp-agent-may-apply' is non-nil; otherwise open the review buffer and return awaiting_user_confirmation."
   :input-schema '(:type "object"
                   :properties (:plan_id (:type "string")
                                :exclude (:type "array" :items (:type "integer")
                                          :description "Step IDs to skip before executing"))
                   :required ["plan_id"])
-  (let ((plan (orgx-mcp--plan args)))
-    (when (eq (orgx-bulk-plan-log-notes plan) 'each)
-      (error "Log_notes mode `each' is not supported over MCP"))
-    (cond
-     ((memq (orgx-bulk-plan-status plan) '(complete discarded))
-      (orgx-bulk-plan-summary plan))
-     ((not orgx-mcp-agent-may-apply)
-      (let ((buf-name (orgx-bulk-plan-buffer-name plan)))
-        (list :status "awaiting_user_confirmation"
-              :plan_buffer buf-name
-              :review_buffer buf-name
-              :plan_id (orgx-bulk-plan-id plan))))
-     (t
-      (when-let* ((excluded (append (plist-get args :exclude) nil)))
-        (dolist (step (orgx-bulk-plan-steps plan))
-          (when (and (memql (orgx-bulk-step-id step) excluded)
-                     (eq (orgx-bulk-step-status step) 'pending))
-            (setf (orgx-bulk-step-status step) 'skipped
-                  (orgx-bulk-step-message step) "excluded over MCP"))))
-      (orgx-bulk-execute plan)
-      (when-let* ((buf (get-buffer (orgx-bulk-plan-buffer-name plan))))
-        (when (buffer-live-p buf)
-          (orgx-bulk-review plan)))
-      (orgx-bulk-plan-summary plan)))))
+  (apply #'hitl-plan-mcp-execute :domain "org-agenda" args))
 
 (provide 'orgx-mcp)
 ;;; orgx-mcp.el ends here
