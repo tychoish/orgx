@@ -269,9 +269,38 @@ Tag comparison is case-insensitive."
 
 ;;;###autoload
 (defun orgx-archive-done-tasks-to-archive-sibling ()
-  "Archive all DONE tasks in the current buffer to their archive sibling."
+  "Archive completed direct children, or siblings when there are no children.
+Only headings at the selected level are processed; descendants of those
+headings move with their parent and are not archived independently."
   (interactive)
-  (orgx-archive-completed-tasks #'org-archive-to-archive-sibling "archive sibling"))
+  (let (targets parent)
+    (save-excursion
+      (save-restriction
+        (cond
+         ((org-before-first-heading-p))
+         (t
+          (org-back-to-heading t)
+          (if (or (save-excursion (org-goto-first-child))
+                  (org-up-heading-safe))
+              (progn
+                (setq parent (point))
+                (org-narrow-to-subtree))
+            nil)))
+        (org-map-entries
+         (lambda ()
+           (when (and (equal parent (save-excursion
+                                      (when (org-up-heading-safe) (point))))
+                      (not (member org-archive-tag (org-get-tags nil t))))
+             (push (copy-marker (point)) targets)))
+         (orgx-done-state-match) nil)))
+    (seq-do (lambda (marker)
+              (save-excursion
+                (goto-char marker)
+                (let ((transient-mark-mode nil))
+                  (org-archive-to-archive-sibling)))
+              (set-marker marker nil))
+            targets)
+    (message "Archived %d tasks to archive sibling." (length targets))))
 
 ;;;###autoload
 (defun orgx-archive-done-tasks-to-archive-file ()

@@ -35,6 +35,56 @@ Other tests may leave `orgx-mode-turn-on' on the hook."
     (let ((match (orgx-done-state-match)))
       (should (string-equal match "/DONE|CANCELLED")))))
 
+(ert-deftest orgx-archive-done-direct-children-test ()
+  "Archive direct children, leaving nested tasks and other branches alone."
+  (with-temp-buffer
+    (orgx-test--org-mode)
+    (insert "* Parent\n** DONE First\n** TODO Open\n*** DONE Nested\n** DONE Second\n** Archive :ARCHIVE:\n*** DONE Old\n* Other\n** DONE Outside\n")
+    (goto-char (point-min))
+    (orgx-archive-done-tasks-to-archive-sibling)
+    (should (string-match-p "\\*\\* TODO Open\n\\*\\*\\* DONE Nested" (buffer-string)))
+    (should (string-match-p "\\*\\*\\* DONE Old" (buffer-string)))
+    (should (string-match-p "\\* Other\n\\*\\* DONE Outside" (buffer-string)))
+    (should (string-match-p "\\*\\*\\* DONE First" (buffer-string)))
+    (should (string-match-p "\\*\\*\\* DONE Second" (buffer-string)))))
+
+(ert-deftest orgx-archive-done-direct-siblings-test ()
+  "At a leaf, archive completed siblings without descending into them."
+  (with-temp-buffer
+    (orgx-test--org-mode)
+    (insert "* Parent\n** TODO Here\n** DONE First\n** TODO Open\n*** DONE Nested\n** DONE Second\n* Other\n** DONE Outside\n")
+    (goto-char (point-min))
+    (forward-line 1)
+    (orgx-archive-done-tasks-to-archive-sibling)
+    (should (string-match-p "\\*\\* TODO Open\n\\*\\*\\* DONE Nested" (buffer-string)))
+    (should (string-match-p "\\* Other\n\\*\\* DONE Outside" (buffer-string)))
+    (should (string-match-p "\\*\\*\\* DONE First" (buffer-string)))
+    (should (string-match-p "\\*\\*\\* DONE Second" (buffer-string)))))
+
+(ert-deftest orgx-archive-done-top-level-test ()
+  "At a top-level leaf, archive only completed top-level headings."
+  (with-temp-buffer
+    (orgx-test--org-mode)
+    (insert "* TODO Here\n* TODO Open\n** DONE Nested\n* DONE Finished\n")
+    (goto-char (point-min))
+    (orgx-archive-done-tasks-to-archive-sibling)
+    (should (string-match-p "\\* TODO Open\n\\*\\* DONE Nested" (buffer-string)))
+    (should (string-match-p "\\*\\* DONE Finished" (buffer-string)))))
+
+(ert-deftest orgx-archive-done-skipped-level-and-region-test ()
+  "Use actual parentage and ignore an active region during archiving."
+  (with-temp-buffer
+    (orgx-test--org-mode)
+    (insert "* Parent\n*** DONE Direct\n*** TODO Open\n***** DONE Nested\n* DONE Outside\n")
+    (goto-char (point-min))
+    (set-mark (point-max))
+    (let ((transient-mark-mode t)
+          (mark-active t))
+      (orgx-archive-done-tasks-to-archive-sibling))
+    (should (string-match-p "\\*\\*\\* TODO Open\n\\*\\*\\*\\*\\* DONE Nested" (buffer-string)))
+    (should (string-match-p "\\* DONE Outside" (buffer-string)))
+    (should (string-match-p "\\*\\*\\*\\* DONE Direct" (buffer-string)))))
+
 (ert-deftest orgx-autoload-capture-test ()
   "Test that orgx-capture is autoloaded on demand."
   (should (fboundp 'orgx-capture))
