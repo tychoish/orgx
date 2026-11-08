@@ -153,8 +153,7 @@ When SHORT is non-nil, format as date-only."
 (defvar deft-directory nil
   "Directory for deft notes.")
 
-(defvar denote-directory nil
-  "Directory for denote notes.")
+(defvar denote-directory)
 
 (defvar org-annotate-file-storage-file nil
   "File for org-annotate-file storage.")
