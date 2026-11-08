@@ -7,6 +7,8 @@
 (require 'orgx)
 (require 'loaddefs-gen)
 
+(defvar denote-directory)
+
 ;; orgx-loaddefs.el is a generated, gitignored convenience file (same
 ;; purpose as magit-autoloads.el / org-loaddefs.el: using the package
 ;; straight from a source checkout without package.el). Regenerate it
@@ -452,6 +454,8 @@ Other tests may leave `orgx-mode-turn-on' on the hook."
         (org-directory nil)
         (org-agenda-files nil)
         (org-annotate-file-storage-file nil)
+        (org-default-notes-file nil)
+        (org-archive-location nil)
         (deft-directory nil)
         (denote-directory nil))
     (orgx-set-notes-directory "/tmp/test-notes")
