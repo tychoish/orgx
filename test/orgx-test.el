@@ -644,4 +644,27 @@ and switches to the one selected via `annotated-completing-read'."
       (when-let* ((buf (find-buffer-visiting temp-file))) (kill-buffer buf)))))
 
 (provide 'orgx-test)
+;;; Entry utilities
+
+(ert-deftest orgx-entry-primitives-test ()
+  (with-temp-buffer
+    (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (org-log-done nil))
+      (orgx-test--org-mode)
+      (insert "* TODO A\n:PROPERTIES:\n:CUSTOM_ID: a\n:END:\n* B\n:PROPERTIES:\n:FOO: bar\n:END:\nbody\n")
+      (org-set-regexps-and-options)
+      (should-not (orgx-entry-find-by-property "FOO" "zzz"))
+      (let ((m (orgx-entry-find-by-property "FOO" "bar")))
+        (should (markerp m))
+        (goto-char (point-min))
+        (orgx-entry-set-property "X" "1" m)
+        (should (= (point) 1))
+        (should (equal (org-entry-get m "X") "1"))
+        (orgx-entry-set-todo "DONE" m)
+        (should (equal (org-entry-get m "TODO") "DONE"))
+        (should-error (orgx-entry-set-todo "NOPE" m))
+        (orgx-entry-append-note "line1\nline2" m)
+        (should (string-match-p "body\n- \\[[^]]+\\] line1\n  line2\n\\'"
+                                (buffer-string)))))))
+
 ;;; orgx-test.el ends here
