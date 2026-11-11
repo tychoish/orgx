@@ -1115,5 +1115,146 @@ When disabled, reverts managed configuration settings and removes hooks."
 ;;;###autoload
 (defalias 'orgx-global-minor-mode #'orgx-global-mode)
 
+;;; Generic entry utilities
+
+(defun orgx-entry-find-by-property (property value)
+  "Return a marker at the first heading whose PROPERTY equals VALUE, or nil.
+PROPERTY is compared as a string against the entry's own (non-inherited)
+value, so CUSTOM_ID and any other property work alike.  The search covers
+the whole accessible buffer (widened); point is not moved."
+  (org-with-wide-buffer
+   (goto-char (point-min))
+   (let (found)
+     (while (and (not found)
+                 (re-search-forward org-heading-regexp nil t))
+       (when (equal (org-entry-get (point) property) value)
+         (setq found (copy-marker (line-beginning-position)))))
+     found)))
+
+(defmacro orgx--with-entry (pos &rest body)
+  "Run BODY with point on the heading of the entry at POS (default point).
+Point is restored afterwards.  The buffer is widened for the duration."
+  (declare (indent 1))
+  `(save-excursion
+     (org-with-wide-buffer
+      (when ,pos (goto-char ,pos))
+      (org-back-to-heading t)
+      ,@body)))
+
+;; Org special properties computed by Org rather than drawer entries.
+(defconst orgx--non-drawer-properties
+  '("TODO" "ITEM" "ALLTAGS" "TAGS" "PRIORITY" "CLOSED" "SCHEDULED" "DEADLINE"
+    "TIMESTAMP" "TIMESTAMP_IA" "FILE" "BLOCKED" "CLOCKSUM" "CLOCKSUM_T"
+    "CATEGORY_ALL")
+  "Property names `orgx-entry-set-property' refuses to write.")
+
+(defun orgx-entry-set-property (property value &optional pos)
+  "Set PROPERTY to VALUE on the entry at POS (default point).
+Signal a `user-error' when VALUE contains a newline or carriage return,
+when PROPERTY is not a plain name, or when PROPERTY is an Org special
+property that is not stored in the PROPERTIES drawer."
+  (unless (and (stringp property)
+               (string-match-p "\\`[A-Za-z0-9_-]+\\'" property))
+    (user-error "Invalid property name: %S" property))
+  (when (member (upcase property) orgx--non-drawer-properties)
+    (user-error "Not a drawer property: %s" property))
+  (unless (and (stringp value) (not (string-match-p "[\n\r]" value)))
+    (user-error "Property value must be a single-line string"))
+  (orgx--with-entry pos
+    (org-entry-put (point) property value)))
+
+(defun orgx-entry-set-todo (state &optional pos)
+  "Set the TODO keyword of the entry at POS (default point) to STATE.
+STATE must be in `org-todo-keywords-1', or the empty string to clear the
+keyword.  Org's normal logging and CLOSED behavior applies."
+  (unless (and (stringp state)
+               (or (string-empty-p state) (member state org-todo-keywords-1)))
+    (error "Unknown TODO state: %s" state))
+  (orgx--with-entry pos
+    (org-todo (if (string-empty-p state) 'none state))))
+
+(defun orgx--entry-body-end ()
+  "Return the position where the body of the entry at point ends.
+That is just before the next heading of any level, or the end of the buffer.
+Point must be on a heading; point is preserved."
+  (save-excursion
+    (end-of-line)
+    (if (outline-next-heading) (point) (point-max))))
+
+(defun orgx--entry-find-child (title)
+  "Return the position of a direct child heading of the entry at point named TITLE."
+  (save-excursion
+    (let ((level (org-current-level))
+          (end (save-excursion (org-end-of-subtree t t)))
+          found)
+      (while (and (not found)
+                  (outline-next-heading)
+                  (< (point) end))
+        (when (and (= (org-current-level) (1+ level))
+                   (equal (org-get-heading t t t t) title))
+          (setq found (line-beginning-position))))
+      found)))
+
+(defun orgx--entry-ensure-child (title)
+  "Return the position of the child heading TITLE of the entry at point.
+Create it, one level deeper, at the end of the subtree when missing."
+  (or (orgx--entry-find-child title)
+      (let ((level (org-current-level)))
+        (save-excursion
+          (org-end-of-subtree t t)
+          (unless (bolp) (insert "\n"))
+          (let ((start (point)))
+            (insert (make-string (1+ level) ?*) " " title "\n")
+            start)))))
+
+(defun orgx-entry-append-note (note &optional pos target-section)
+  "Append NOTE as \"- [TIMESTAMP] NOTE\" to the body of the entry at POS.
+The note goes after the entry's drawers (PROPERTIES, LOGBOOK) and before
+its first child.  With TARGET-SECTION, the note goes in the child heading
+of that title instead, which is created when missing."
+  (unless (and (stringp note) (not (string-empty-p (string-trim note))))
+    (error "Note is empty"))
+  (orgx--with-entry pos
+    (when target-section
+      (goto-char (orgx--entry-ensure-child target-section)))
+    (let* ((head (point))
+           (end (orgx--entry-body-end))
+           (text (concat "- " (format-time-string "[%Y-%m-%d %a %H:%M]") " "
+                         (replace-regexp-in-string "\r\n\\|\r\\|\n" "\n  " (string-trim-right note) t t)
+                         "\n")))
+      (goto-char end)
+      (when (and (eobp) (not (bolp))) (insert "\n"))
+      ;; Sit after existing body text but before trailing blank lines.
+      (re-search-backward "[^ \t\n]" head t)
+      (end-of-line)
+      (if (eobp) (insert "\n") (forward-char 1))
+      (insert text))))
+
+(defun orgx-entry-update-in-file (file match-property match-value fn)
+  "Visit FILE, call FN at the heading whose MATCH-PROPERTY is MATCH-VALUE, save.
+FN is called with the heading's position.  Prompts are suppressed and the
+buffer is saved afterwards.  Signal an error if no heading matches.  Return
+a plist (:file FILE :heading TITLE)."
+  (let* ((file (expand-file-name file))
+         (buf (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) t))
+                         ((symbol-function 'yes-or-no-p) (lambda (&rest _) t)))
+                (find-file-noselect file))))
+    (with-current-buffer buf
+      (unless (derived-mode-p 'org-mode) (org-mode))
+      (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) t))
+                ((symbol-function 'yes-or-no-p) (lambda (&rest _) t)))
+        (let* ((inhibit-read-only t)
+               (marker (or (orgx-entry-find-by-property match-property match-value)
+                           (error "No heading in %s with %s = %s"
+                                  (file-name-nondirectory file)
+                                  match-property match-value)))
+               (title (org-with-wide-buffer
+                       (goto-char marker)
+                       (org-get-heading t t t t))))
+          (unwind-protect (funcall fn marker)
+            (set-marker marker nil))
+          (save-buffer)
+          (list :file file :heading title))))))
+
 (provide 'orgx)
 ;;; orgx.el ends here
