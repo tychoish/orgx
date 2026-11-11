@@ -35,6 +35,7 @@
 (require 'mcpkit)
 (require 'hitl-plan)
 (require 'hitl-plan-mcp)
+(require 'orgx)
 (require 'orgx-bulk)
 (require 'orgx-bulk-ops)
 (require 'orgx-bulk-agenda)
@@ -297,6 +298,73 @@ buffer is displayed without taking focus."
                                          :description "Step IDs to skip before executing"))
                   :required ["plan_id"])
   (apply #'hitl-plan-mcp-execute :domain "org-agenda" args))
+
+;;; Entry editing
+
+(defun orgx-mcp--string-args (args keys)
+  "Signal an error unless every key in KEYS is a non-empty string in ARGS."
+  (dolist (k keys)
+    (let ((v (plist-get args k)))
+      (unless (and (stringp v) (not (string-empty-p v)))
+        (error "`%s' must be a non-empty string" (substring (symbol-name k) 1))))))
+
+(defun orgx-mcp--entry-edit (args keys fn)
+  "Run FN on the heading ARGS selects, returning the result plist.
+KEYS are the required string arguments.  FILE must be allowed (see
+`orgx-bulk-file-allowed-p'); file-local variables are ignored."
+  (hitl-plan-mcp--guard
+    (orgx-mcp--string-args args (append '(:file :match_property :match_value) keys))
+    (let* ((file (orgx-bulk--check-file (plist-get args :file)))
+           (enable-local-variables nil)
+           (enable-dir-local-variables nil)
+           (res (orgx-entry-update-in-file
+                 file (plist-get args :match_property) (plist-get args :match_value)
+                 fn)))
+      (append res (list :status "updated")))))
+
+(defconst orgx-mcp--match-schema
+  '(:file (:type "string" :description "Org file containing the heading")
+    :match_property (:type "string" :description "Property identifying the heading (e.g. CUSTOM_ID)")
+    :match_value (:type "string" :description "Value of match_property on the heading"))
+  "Input schema properties shared by the entry editing tools.")
+
+(mcpkit-register-tool 'org_heading_set_property 'orgx
+  :description "Set a property on the heading whose match_property equals match_value."
+  :input-schema `(:type "object"
+                  :properties (,@orgx-mcp--match-schema
+                               :property (:type "string" :description "Property to set")
+                               :value (:type "string" :description "New property value"))
+                  :required ["file" "match_property" "match_value" "property" "value"])
+  (orgx-mcp--entry-edit
+   args '(:property :value)
+   (lambda (pos) (orgx-entry-set-property (plist-get args :property)
+                                          (plist-get args :value) pos))))
+
+(mcpkit-register-tool 'org_heading_set_todo 'orgx
+  :description "Set the TODO state of the heading whose match_property equals match_value."
+  :input-schema `(:type "object"
+                  :properties (,@orgx-mcp--match-schema
+                               :state (:type "string" :description "TODO keyword, e.g. TODO or DONE"))
+                  :required ["file" "match_property" "match_value" "state"])
+  (orgx-mcp--entry-edit
+   args '(:state)
+   (lambda (pos) (orgx-entry-set-todo (plist-get args :state) pos))))
+
+(mcpkit-register-tool 'org_heading_append_note 'orgx
+  :description "Append a timestamped bullet note to the body of the heading whose match_property equals match_value, after its drawers; optionally under a child heading."
+  :input-schema `(:type "object"
+                  :properties (,@orgx-mcp--match-schema
+                               :note (:type "string" :description "Note text")
+                               :target_section (:type "string"
+                                                :description "Optional child heading title to append under (created if missing)"))
+                  :required ["file" "match_property" "match_value" "note"])
+  (orgx-mcp--entry-edit
+   args '(:note)
+   (lambda (pos)
+     (let ((section (plist-get args :target_section)))
+       (unless (or (null section) (stringp section))
+         (error "`target_section' must be a string"))
+       (orgx-entry-append-note (plist-get args :note) pos section)))))
 
 (provide 'orgx-mcp)
 ;;; orgx-mcp.el ends here

@@ -321,5 +321,212 @@ Signal an error carrying the handler's error message on failure."
       (should (equal "excluded over MCP"
                      (hitl-plan-step-message (nth 1 (hitl-plan-steps (hitl-plan-get id)))))))))
 
-(provide 'orgx-mcp-test)
+;;; Entry editing tools
+
+(defconst orgx-mcp-test--entry-org
+  (concat "* TODO First\n:PROPERTIES:\n:CUSTOM_ID: one\n:END:\n"
+          ":LOGBOOK:\n- State \"TODO\" from \"\" [2024-01-01 Mon 10:00]\n:END:\n"
+          "Body text.\n"
+          "** Child\nchild body\n"
+          "* TODO Second\n:PROPERTIES:\n:CUSTOM_ID: two\n:END:\n")
+  "Fixture for the entry editing tool tests.")
+
+(defun orgx-mcp-test--text (file)
+  "Return the saved contents of FILE."
+  (with-temp-buffer (insert-file-contents file) (buffer-string)))
+
+(ert-deftest orgx-mcp-heading-set-property-test ()
+  (orgx-mcp-test--with-file f orgx-mcp-test--entry-org
+    (let ((res (orgx-mcp-test--call
+                "org_heading_set_property"
+                (list :file f :match_property "CUSTOM_ID" :match_value "two"
+                      :property "PR_STATE" :value "open"))))
+      (should (equal (plist-get res :heading) "Second"))
+      (should (equal (plist-get res :status) "updated"))
+      (should (string-match-p "^:PR_STATE: +open$" (orgx-mcp-test--text f))))))
+
+(ert-deftest orgx-mcp-heading-set-todo-test ()
+  (orgx-mcp-test--with-file f orgx-mcp-test--entry-org
+    (orgx-mcp-test--call "org_heading_set_todo"
+                         (list :file f :match_property "CUSTOM_ID" :match_value "one"
+                               :state "DONE"))
+    (let ((text (orgx-mcp-test--text f)))
+      (should (string-match-p "^\\* DONE First" text))
+      (should (string-match-p "^\\* TODO Second" text)))
+    (should (string-match-p
+             "Unknown TODO state"
+             (plist-get (orgx-mcp-test--call
+                         "org_heading_set_todo"
+                         (list :file f :match_property "CUSTOM_ID" :match_value "one"
+                               :state "BOGUS"))
+                        :error)))))
+
+(ert-deftest orgx-mcp-heading-append-note-test ()
+  (orgx-mcp-test--with-file f orgx-mcp-test--entry-org
+    (orgx-mcp-test--call "org_heading_append_note"
+                         (list :file f :match_property "CUSTOM_ID" :match_value "one"
+                               :note "hello note"))
+    (let ((text (orgx-mcp-test--text f)))
+      ;; After drawers and existing body, before the child; LOGBOOK intact.
+      (should (string-match-p
+               (concat ":LOGBOOK:\n- State \"TODO\" from \"\" \\[2024-01-01 Mon 10:00\\]\n:END:\n"
+                       "Body text\\.\n- \\[[0-9-]+ [A-Za-z]+ [0-9:]+\\] hello note\n\\*\\* Child")
+               text)))))
+
+(ert-deftest orgx-mcp-heading-append-note-section-test ()
+  (orgx-mcp-test--with-file f orgx-mcp-test--entry-org
+    (dolist (n '("n1" "n2"))
+      (orgx-mcp-test--call "org_heading_append_note"
+                           (list :file f :match_property "CUSTOM_ID" :match_value "two"
+                                 :note n :target_section "Notes")))
+    (let ((text (orgx-mcp-test--text f)))
+      (should (string-match-p ":CUSTOM_ID: two\n:END:\n\\*\\* Notes\n- \\[[^]]+\\] n1\n- \\[[^]]+\\] n2\n\\'" text))
+      (should (= 1 (with-temp-buffer (insert text) (goto-char (point-min))
+                                      (how-many "^\\*\\* Notes$")))))))
+
+(ert-deftest orgx-mcp-heading-no-match-test ()
+  (orgx-mcp-test--with-file f orgx-mcp-test--entry-org
+    (should (string-match-p
+             "No heading"
+             (plist-get (orgx-mcp-test--call
+                         "org_heading_set_todo"
+                         (list :file f :match_property "CUSTOM_ID"
+                               :match_value "nope" :state "DONE"))
+                        :error)))
+    (should (plist-get (orgx-mcp-test--call
+                        "org_heading_set_todo"
+                        (list :file f :match_property "CUSTOM_ID"))
+                       :error))))
+
+;;; Prompt suppression and allowlist
+
+(defmacro orgx-mcp-test--no-prompts (&rest body)
+  "Run BODY with every interactive prompt primitive signalling an error."
+  (declare (indent 0))
+  `(cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) (error "y-or-n-p prompted")))
+             ((symbol-function 'yes-or-no-p) (lambda (&rest _) (error "yes-or-no-p prompted")))
+             ((symbol-function 'read-string) (lambda (&rest _) (error "read-string prompted")))
+             ((symbol-function 'read-from-minibuffer) (lambda (&rest _) (error "minibuffer prompted")))
+             ((symbol-function 'completing-read) (lambda (&rest _) (error "completing-read prompted")))
+             ((symbol-function 'read-char-choice) (lambda (&rest _) (error "read-char-choice prompted")))
+             ((symbol-function 'ask-user-about-supersession-threat)
+              (lambda (&rest _) (error "supersession prompted")))
+             ((symbol-function 'ask-user-about-lock)
+              (lambda (&rest _) (error "lock prompted"))))
+     ,@body))
+
+(defconst orgx-mcp-test--edit-calls
+  '(("org_heading_set_property" (:property "P" :value "v"))
+    ("org_heading_set_todo" (:state "DONE"))
+    ("org_heading_append_note" (:note "prompt-free")))
+  "Tool name and extra args for every entry editing tool.")
+
+(defun orgx-mcp-test--edit-call (f tool extra &optional value)
+  (orgx-mcp-test--call tool (append (list :file f :match_property "CUSTOM_ID"
+                                          :match_value (or value "one"))
+                                    extra)))
+
+(ert-deftest orgx-mcp-heading-tools-modified-buffer-no-prompt-test ()
+  "A visited buffer with unsaved edits is saved without any prompt."
+  (dolist (call orgx-mcp-test--edit-calls)
+    (orgx-mcp-test--with-file f orgx-mcp-test--entry-org
+      (with-current-buffer (find-buffer-visiting f)
+        (goto-char (point-max))
+        (insert "* Unsaved\n")
+        (should (buffer-modified-p)))
+      (orgx-mcp-test--no-prompts
+        (let ((res (orgx-mcp-test--edit-call f (car call) (cadr call))))
+          (should-not (plist-get res :error))
+          (should (equal "updated" (plist-get res :status)))))
+      (should-not (buffer-modified-p (find-buffer-visiting f)))
+      (should (string-match-p "^\\* Unsaved" (orgx-mcp-test--text f))))))
+
+(ert-deftest orgx-mcp-heading-tools-superseded-file-no-prompt-test ()
+  "A file changed on disk behind a visited buffer never prompts."
+  (dolist (call orgx-mcp-test--edit-calls)
+    (orgx-mcp-test--with-file f orgx-mcp-test--entry-org
+      (let ((buf (find-buffer-visiting f)))
+        (with-temp-file f (insert orgx-mcp-test--entry-org "* Disk\n"))
+        (set-file-times f (time-add (current-time) 5))
+        (should-not (verify-visited-file-modtime buf))
+        (orgx-mcp-test--no-prompts
+          (should (equal "updated"
+                         (plist-get (orgx-mcp-test--edit-call f (car call) (cadr call))
+                                    :status))))))))
+
+(ert-deftest orgx-mcp-heading-tools-ignore-file-local-variables-test ()
+  "File-local `eval' forms are neither run nor prompted for."
+  (dolist (call orgx-mcp-test--edit-calls)
+    (let ((orgx-mcp-test--evaluated nil))
+      (defvar orgx-mcp-test--evaluated)
+      (orgx-mcp-test--with-file
+          f (concat orgx-mcp-test--entry-org
+                    "# Local Variables:\n# eval: (setq orgx-mcp-test--evaluated t)\n# End:\n")
+        (kill-buffer (find-buffer-visiting f))
+        (orgx-mcp-test--no-prompts
+          (should-not (plist-get (orgx-mcp-test--edit-call f (car call) (cadr call)) :error)))
+        (should-not orgx-mcp-test--evaluated)))))
+
+(ert-deftest orgx-mcp-heading-tools-reject-unlisted-file-test ()
+  "A file off the allowlist is rejected untouched by every editing tool."
+  (dolist (call orgx-mcp-test--edit-calls)
+    (orgx-mcp-test--with-file f orgx-mcp-test--entry-org
+      (let ((other (make-temp-file "orgx-mcp-other-" nil ".org" orgx-mcp-test--entry-org)))
+        (unwind-protect
+            (orgx-mcp-test--no-prompts
+              (let ((res (orgx-mcp-test--edit-call other (car call) (cadr call))))
+                (should (string-match-p "File not allowed" (plist-get res :error)))
+                (should (equal orgx-mcp-test--entry-org (orgx-mcp-test--text other)))
+                (should-not (find-buffer-visiting other))))
+          (when-let* ((b (find-buffer-visiting other))) (kill-buffer b))
+          (delete-file other))))))
+
+(ert-deftest orgx-mcp-heading-tools-reject-non-org-and-missing-file-test ()
+  (dolist (call orgx-mcp-test--edit-calls)
+    (orgx-mcp-test--with-file f orgx-mcp-test--entry-org
+      (let ((txt (make-temp-file "orgx-mcp-" nil ".txt" "* TODO x\n")))
+        (unwind-protect
+            (let ((orgx-bulk-mcp-allowed-files (list txt (concat f ".missing"))))
+              (dolist (file (list txt (concat f ".missing")))
+                (should (string-match-p "File not allowed"
+                                        (plist-get (orgx-mcp-test--edit-call file (car call) (cadr call))
+                                                   :error)))))
+          (delete-file txt))))))
+
+;; Injection hardening.
+
+(defun orgx-mcp-test--set-prop (f prop val)
+  (orgx-mcp-test--call
+   "org_heading_set_property"
+   (list :file f :match_property "CUSTOM_ID" :match_value "two"
+         :property prop :value val)))
+
+(ert-deftest orgx-mcp-set-property-rejects-newline-test ()
+  (orgx-mcp-test--with-file f orgx-mcp-test--entry-org
+    (should (plist-get (orgx-mcp-test--set-prop f "P" "a\n:END:\n* Evil") :error))
+    (should (plist-get (orgx-mcp-test--set-prop f "P" "a\rb") :error))
+    (should (plist-get (orgx-mcp-test--set-prop f "bad name" "v") :error))
+    (should-not (string-match-p "Evil" (orgx-mcp-test--text f)))))
+
+(ert-deftest orgx-mcp-set-property-rejects-special-test ()
+  (orgx-mcp-test--with-file f orgx-mcp-test--entry-org
+    (dolist (p '("TODO" "todo" "ITEM" "ALLTAGS" "TAGS" "PRIORITY" "CLOSED"
+                 "SCHEDULED" "DEADLINE" "TIMESTAMP" "FILE" "BLOCKED" "CLOCKSUM"))
+      (should (plist-get (orgx-mcp-test--set-prop f p "x") :error)))
+    (should (equal (orgx-mcp-test--text f) orgx-mcp-test--entry-org))))
+
+(ert-deftest orgx-mcp-append-note-injection-test ()
+  (orgx-mcp-test--with-file f orgx-mcp-test--entry-org
+    (dolist (n '("x\n* Injected" "y\n:END:\n#+TITLE: z" "w\r* CR"))
+      (orgx-mcp-test--call "org_heading_append_note"
+                           (list :file f :match_property "CUSTOM_ID" :match_value "two"
+                                 :note n)))
+    (let ((text (orgx-mcp-test--text f)))
+      (should-not (string-match-p "^\\* \\(Injected\\|CR\\)" text))
+      (should-not (string-match-p "^:END:\n.*:END:" (substring text (string-match "Second" text))))
+      (should-not (string-match-p "^#\\+" text))
+      (with-temp-buffer
+        (insert text) (org-mode)
+        (should (= 2 (length (org-map-entries #'point "LEVEL=1"))))))))
+
 ;;; orgx-mcp-test.el ends here
