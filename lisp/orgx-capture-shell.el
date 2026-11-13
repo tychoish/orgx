@@ -108,7 +108,7 @@ never lands after a trailing child tagged with `org-archive-tag'."
   "Recognized capture templates.")
 
 (defconst orgx-capture-shell--prompt-regexp
-  (rx bol "orgx-capture " (*? nonl) "> ")
+  (rx bol (any "●✓✗") " [" (*? nonl) "] ❯ ")
   "Regexp matching the shell prompt.")
 
 ;;; State variables (buffer-local)
@@ -367,6 +367,9 @@ re-leveled to be children of the target.  Returns a record
         (delay-mode-hooks (org-mode))
         (orgx-capture-shell--buffer-headline-paths)))))
 
+(defvar orgx-capture-shell--status nil
+  "Dynamically bound status of the current shell input, when processing one.")
+
 (cl-defun orgx-capture-shell--capture (text &key (template orgx-capture-shell-current-template)
                                             (file orgx-capture-shell-current-file)
                                             (headline orgx-capture-shell-current-headline)
@@ -385,6 +388,8 @@ description string."
                   entry)))
     (orgx-capture-shell--insert-entry
      file headline entry (orgx-capture-shell--resolve-prepend template file))
+    (when orgx-capture-shell--status
+      (setq orgx-capture-shell--status 'success))
     (format "Captured -> [%s%s] %s"
             (file-name-nondirectory file)
             (if (and headline (not (string-empty-p headline)))
@@ -420,6 +425,12 @@ description string."
 
 (defvar orgx-capture-shell--force-form nil
   "When non-nil, the input sender treats the current input as a form request.")
+
+(defvar orgx-capture-shell--form-origin nil
+  "Shell buffer that opened the current transient capture form, if any.")
+
+(defvar orgx-capture-shell--form-prompt-marker nil
+  "Marker at the end of the prompt associated with the transient form.")
 
 (defvar orgx-capture-shell--form nil
   "Plist of values (:title :body :template :file :headline) for the transient form.")
@@ -488,6 +499,8 @@ Returns a message string."
   (let ((defaults (orgx-capture-shell--form-defaults)))
     (pcase orgx-capture-shell-form-style
       ('transient
+       (setq orgx-capture-shell--form-origin
+             (and (derived-mode-p 'orgx-capture-shell-mode) (current-buffer)))
        (setq orgx-capture-shell--form (plist-put (copy-sequence defaults) :title (or initial "")))
        (orgx-capture-shell-form-transient)
        "Capture form opened.")
@@ -544,10 +557,35 @@ Returns a message string."
                     (plist-get orgx-capture-shell--form :headline)))))
 
 (defun orgx-capture-shell-form-commit ()
-  "Capture the transient form's values."
+  "Capture the transient form's values and update its shell prompt."
   (interactive)
-  (message "%s" (orgx-capture-shell--form-commit orgx-capture-shell--form))
-  (setq orgx-capture-shell--form nil))
+  (let ((orgx-capture-shell--status 'ready)
+        (origin orgx-capture-shell--form-origin))
+    (unwind-protect
+        (condition-case err
+            (message "%s" (orgx-capture-shell--form-commit orgx-capture-shell--form))
+          (error
+           (setq orgx-capture-shell--status 'error)
+           (message "%s" (error-message-string err))))
+      (when (and (buffer-live-p origin)
+                 (markerp orgx-capture-shell--form-prompt-marker)
+                 (eq (marker-buffer orgx-capture-shell--form-prompt-marker) origin))
+        (with-current-buffer origin
+          (save-excursion
+            (goto-char orgx-capture-shell--form-prompt-marker)
+            (let ((inhibit-field-text-motion t))
+              (beginning-of-line))
+            (when (and (looking-at orgx-capture-shell--prompt-regexp)
+                       (= (match-end 0) orgx-capture-shell--form-prompt-marker))
+              (let ((inhibit-read-only t))
+                (delete-region (point) (1+ (point)))
+                (insert (substring (orgx-capture-shell--prompt-string
+                                    orgx-capture-shell--status) 0 1)))))))
+      (setq orgx-capture-shell--form nil)
+      (setq orgx-capture-shell--form-origin nil)
+      (when (markerp orgx-capture-shell--form-prompt-marker)
+        (set-marker orgx-capture-shell--form-prompt-marker nil))
+      (setq orgx-capture-shell--form-prompt-marker nil))))
 
 (defun orgx-capture-shell--form-field (key label)
   "Return a description function showing LABEL and the form value at KEY."
@@ -620,15 +658,21 @@ Returns a message string."
 
 ;;; Slash command dispatcher
 
-(defun orgx-capture-shell--prompt-string ()
-  "Return the prompt string reflecting current target and template."
-  (let ((file-name (if orgx-capture-shell-current-file
-                       (file-name-nondirectory orgx-capture-shell-current-file)
-                     "none"))
-        (hl (or orgx-capture-shell-current-headline "")))
-    (format "orgx-capture [%s%s|%s]> "
-            file-name
-            (if (string-empty-p hl) "" (format ":%s" hl))
+(defun orgx-capture-shell--prompt-string (&optional status)
+  "Return the target and template prompt for STATUS.
+STATUS is `ready', `success', or `error'; it defaults to `ready'."
+  (let* ((indicator (pcase status
+                      ('success (propertize "✓" 'face 'success))
+                      ('error (propertize "✗" 'face 'error))
+                      (_ (propertize "●" 'face 'font-lock-keyword-face))))
+         (file-name (if orgx-capture-shell-current-file
+                        (file-name-nondirectory orgx-capture-shell-current-file)
+                      "none"))
+         (headline orgx-capture-shell-current-headline))
+    (format "%s [%s%s · %s] ❯ " indicator file-name
+            (if (and headline (not (string-empty-p headline)))
+                (format " : %s" headline)
+              "")
             orgx-capture-shell-current-template)))
 
 (defun orgx-capture-shell--execute-slash-command (cmd-line)
@@ -659,6 +703,8 @@ Returns a message string."
                (progn
                  (setq orgx-capture-shell-current-template sym)
                  (format "Template switched to: %s" sym))
+             (when orgx-capture-shell--status
+               (setq orgx-capture-shell--status 'error))
              (format "Unknown template: %s (choose task, note, journal, plain)" args)))))
       ("form"
        (orgx-capture-shell--run-form args))
@@ -672,8 +718,13 @@ Returns a message string."
                (setq orgx-capture-shell-current-file full)
                (setq orgx-capture-shell-current-headline nil)
                (format "Target set to denote note: %s" choice)))
+         (when orgx-capture-shell--status
+           (setq orgx-capture-shell--status 'error))
          "Denote is not available."))
       ("undo"
+       (unless orgx-capture-shell-undo-ring
+         (when orgx-capture-shell--status
+           (setq orgx-capture-shell--status 'error)))
        (orgx-capture-shell--undo-last))
       ((or "recent" "list")
        (if orgx-capture-shell-undo-ring
@@ -695,6 +746,8 @@ Returns a message string."
                     "  /help                     - Display this help message")
                   "\n"))
       (_
+       (when orgx-capture-shell--status
+         (setq orgx-capture-shell--status 'error))
        (format "Unknown command: /%s (type /help for available commands)" verb)))))
 
 ;;; Comint input filter and handler
@@ -723,30 +776,38 @@ A semicolon followed by body text separates the title from the body.
 Use C-j to insert a literal newline before submitting with RET."
   (let* ((trimmed (string-trim input))
          (force orgx-capture-shell--force-form)
+         (orgx-capture-shell--status 'ready)
+         (previous-form orgx-capture-shell--form)
          (msg
-          (cond
-           ((string-prefix-p "/" trimmed)
-            (orgx-capture-shell--execute-slash-command trimmed))
-           ((or force (and (not (string-empty-p trimmed))
-                           (orgx-capture-shell--form-triggered-p trimmed)))
-            (orgx-capture-shell--run-form
-             (string-trim (string-remove-suffix
-                           (or orgx-capture-shell-form-trigger "") trimmed))))
-           ((not (string-empty-p trimmed))
-            (unless orgx-capture-shell-current-file
-              (let ((res (orgx-capture-shell--resolve-target)))
-                (setq orgx-capture-shell-current-file (car res))
-                (setq orgx-capture-shell-current-headline (cdr res))))
-            (orgx-capture-shell--capture
-             (let ((text (orgx-capture-shell--unescape-trigger trimmed)))
-               (if (string-match ";[ \t]*\\([^\n]+\\)" text)
-                   (concat (substring text 0 (match-beginning 0)) "\n"
-                           (substring text (match-beginning 1)))
-                 text)))))))
+          (condition-case err
+              (cond
+               ((string-prefix-p "/" trimmed)
+		(orgx-capture-shell--execute-slash-command trimmed))
+               ((or force (and (not (string-empty-p trimmed))
+                               (orgx-capture-shell--form-triggered-p trimmed)))
+		(orgx-capture-shell--run-form
+		 (string-trim (string-remove-suffix
+                               (or orgx-capture-shell-form-trigger "") trimmed))))
+               ((not (string-empty-p trimmed))
+		(unless orgx-capture-shell-current-file
+		  (let ((res (orgx-capture-shell--resolve-target)))
+                    (setq orgx-capture-shell-current-file (car res))
+                    (setq orgx-capture-shell-current-headline (cdr res))))
+		(orgx-capture-shell--capture
+		 (let ((text (orgx-capture-shell--unescape-trigger trimmed)))
+		   (if (string-match ";[ \t]*\\([^\n]+\\)" text)
+                       (concat (substring text 0 (match-beginning 0)) "\n"
+                               (substring text (match-beginning 1)))
+                     text)))))
+            (error
+             (setq orgx-capture-shell--status 'error)
+             (error-message-string err)))))
     (when (and msg (not (string-empty-p msg)))
-      (comint-output-filter proc (concat msg "\n"))))
-  ;; Update prompt with current target
-  (comint-output-filter proc (orgx-capture-shell--prompt-string)))
+      (comint-output-filter proc (concat msg "\n")))
+    (comint-output-filter proc (orgx-capture-shell--prompt-string orgx-capture-shell--status))
+    (when (and (eq orgx-capture-shell--form-origin (current-buffer))
+               (not (eq previous-form orgx-capture-shell--form)))
+      (setq orgx-capture-shell--form-prompt-marker (copy-marker (process-mark proc))))))
 
 (defun orgx-capture-shell-send-form ()
   "Send the current input to the capture form, regardless of the trigger."
