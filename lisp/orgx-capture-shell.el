@@ -181,9 +181,12 @@ never lands after a trailing child tagged with `org-archive-tag'."
         ('task
          (format "* TODO %s" trimmed))
         ('journal
-         (format "* %s <%s>"
-                 trimmed
-                 (format-time-string "%Y-%m-%d %H:%M")))
+         (let* ((parts (split-string trimmed "\n"))
+                (title (car parts))
+                (body (cdr parts)))
+           (concat (format "* %s <%s>" title
+                           (format-time-string "%Y-%m-%d %H:%M"))
+                   (if body (concat "\n" (string-join body "\n")) ""))))
         (_
          (format "* %s" trimmed))))))
 
@@ -715,7 +718,9 @@ A doubled trigger is an escape: it captures INPUT with one trigger removed."
       input)))
 
 (defun orgx-capture-shell-input-sender (proc input)
-  "Send and process INPUT from the comint prompt via PROC."
+  "Send and process INPUT from the comint prompt via PROC.
+A semicolon followed by body text separates the title from the body.
+Use C-j to insert a literal newline before submitting with RET."
   (let* ((trimmed (string-trim input))
          (force orgx-capture-shell--force-form)
          (msg
@@ -733,7 +738,11 @@ A doubled trigger is an escape: it captures INPUT with one trigger removed."
                 (setq orgx-capture-shell-current-file (car res))
                 (setq orgx-capture-shell-current-headline (cdr res))))
             (orgx-capture-shell--capture
-             (orgx-capture-shell--unescape-trigger trimmed))))))
+             (let ((text (orgx-capture-shell--unescape-trigger trimmed)))
+               (if (string-match ";[ \t]*\\([^\n]+\\)" text)
+                   (concat (substring text 0 (match-beginning 0)) "\n"
+                           (substring text (match-beginning 1)))
+                 text)))))))
     (when (and msg (not (string-empty-p msg)))
       (comint-output-filter proc (concat msg "\n"))))
   ;; Update prompt with current target
@@ -790,6 +799,7 @@ Completes command names, `/template' names, and `/target' files and headlines."
   :parent comint-mode-map
   "C-c C-u" #'orgx-capture-shell--undo-last
   "C-c C-k" #'comint-kill-input
+  "C-j" #'newline
   "C-<return>" #'orgx-capture-shell-send-form)
 
 (define-derived-mode orgx-capture-shell-mode comint-mode "orgx-shell"

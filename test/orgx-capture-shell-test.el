@@ -762,5 +762,19 @@
           (should (buffer-narrowed-p))
           (should (looking-at "\\*\\* TODO first")))))))
 
+(ert-deftest orgx-capture-shell-body-separators-test ()
+  "A semicolon or newline separates title from body."
+  (orgx-capture-shell-test--with-file "* Tasks\n"
+    (cl-letf (((symbol-function 'orgx-capture-shell--resolve-target)
+               (lambda (&optional _) (cons file "Tasks"))))
+      (orgx-capture-shell-test--sender "First; details")
+      (orgx-capture-shell-test--sender "Second\nmore details")
+      (let ((contents (orgx-capture-shell-test--contents file)))
+        (should (string-match-p "TODO First\ndetails" contents))
+        (should (string-match-p "TODO Second\nmore details" contents)))))
+  (should (eq (keymap-lookup orgx-capture-shell-mode-map "C-j") #'newline))
+  (should (string-match-p "\nbody\\'"
+                          (orgx-capture-shell--format-entry "title\nbody" 'journal))))
+
 (provide 'orgx-capture-shell-test)
 ;;; orgx-capture-shell-test.el ends here
