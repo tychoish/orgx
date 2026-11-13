@@ -154,7 +154,6 @@ When SHORT is non-nil, format as date-only."
   "Directory for deft notes.")
 
 (defvar denote-directory)
-(declare-function denote-directories "denote")
 
 (defvar org-annotate-file-storage-file nil
   "File for org-annotate-file storage.")
@@ -183,7 +182,7 @@ Updates `local-notes-directory', `org-directory',
 
 ;;;###autoload
 (defun orgx-add-notes-to-agenda ()
-  "Add configured Org and Denote directories to `org-agenda-files'."
+  "Add configured Org directories to `org-agenda-files'."
   (if (stringp org-agenda-files)
       (display-warning 'orgx "Cannot add directories: org-agenda-files names a file" :warning)
     (seq-do (lambda (directory)
@@ -198,19 +197,7 @@ Updates `local-notes-directory', `org-directory',
                                     org-agenda-files)
                     (add-to-list 'org-agenda-files path t)))))
             (flatten-tree (list (bound-and-true-p org-directory)
-                                (if (and (featurep 'denote) (fboundp 'denote-directories))
-                                    (denote-directories)
-                                  (bound-and-true-p denote-directory))
                                 user-org-directories)))))
-
-(defun orgx--add-denote-directories-after-load (_file)
-  "Add Denote directories once Denote has loaded."
-  (when (featurep 'denote)
-    (remove-hook 'after-load-functions #'orgx--add-denote-directories-after-load)
-    (orgx-add-notes-to-agenda)))
-
-;;;###autoload
-(defalias 'bootstrap-set-notes-directory #'orgx-set-notes-directory)
 
 
 ;;;###autoload
@@ -1099,8 +1086,6 @@ Activates `orgx-command-map' under C-c o."
   (interactive)
   (orgx-global--apply-settings)
   (orgx-add-notes-to-agenda)
-  (unless (featurep 'denote)
-    (add-hook 'after-load-functions #'orgx--add-denote-directories-after-load))
   (orgx--enable-advice)
   (org-load-modules-maybe t)
   (orgx-babel-setup)
@@ -1131,7 +1116,6 @@ When disabled, reverts managed configuration settings and removes hooks."
         (add-hook 'org-capture-mode-hook #'orgx-mode-turn-on)
         (add-hook 'org-agenda-mode-hook #'orgx-agenda-minor-mode-turn-on))
     (orgx--disable-advice)
-    (remove-hook 'after-load-functions #'orgx--add-denote-directories-after-load)
     (orgx-global--revert-settings)
     (remove-hook 'org-mode-hook #'orgx-mode-turn-on)
     (remove-hook 'org-capture-mode-hook #'orgx-mode-turn-on)
