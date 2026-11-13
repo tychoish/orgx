@@ -639,7 +639,7 @@ Returns a message string."
       (widen))
     (goto-char position)
     (when (derived-mode-p 'org-mode)
-      (org-show-context))))
+      (org-fold-show-context))))
 
 (defun orgx-capture-shell--recent-list ()
   "Return the recent captures as clickable buttons."
