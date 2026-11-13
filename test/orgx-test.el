@@ -450,9 +450,9 @@ Other tests may leave `orgx-mode-turn-on' on the hook."
 (ert-deftest orgx-set-notes-directory-test ()
   "Test setting the notes directory updates related paths."
   (let ((local-notes-directory nil)
-        (user-org-directories nil)
+        (user-org-directories '("/tmp/other-org"))
         (org-directory nil)
-        (org-agenda-files nil)
+        (org-agenda-files '("/tmp/existing.org"))
         (org-annotate-file-storage-file nil)
         (org-default-notes-file nil)
         (org-archive-location nil)
@@ -461,7 +461,14 @@ Other tests may leave `orgx-mode-turn-on' on the hook."
     (orgx-set-notes-directory "/tmp/test-notes")
     (should (equal local-notes-directory (expand-file-name "/tmp/test-notes")))
     (should (equal org-directory (expand-file-name "/tmp/test-notes/org")))
-    (should (member (expand-file-name "/tmp/test-notes/org") org-agenda-files))
+    (should (equal org-agenda-files '("/tmp/existing.org")))
+    (cl-letf (((symbol-function 'denote-directories)
+               (lambda () (list denote-directory))))
+      (orgx-add-notes-to-agenda)
+      (orgx-add-notes-to-agenda))
+    (should (equal org-agenda-files
+                   '("/tmp/existing.org" "/tmp/test-notes/org"
+                     "/tmp/test-notes/denote" "/tmp/other-org")))
     (should (equal org-annotate-file-storage-file (expand-file-name "/tmp/test-notes/org/records.org")))
     (should (equal org-default-notes-file (expand-file-name "/tmp/test-notes/org/records.org")))
     (should (equal org-archive-location (expand-file-name "/tmp/test-notes/org/archive/%s::datetree/")))
@@ -470,6 +477,32 @@ Other tests may leave `orgx-mode-turn-on' on the hook."
     ;; Also verify bootstrap-set-notes-directory alias works
     (bootstrap-set-notes-directory "/tmp/test-notes-2")
     (should (equal local-notes-directory (expand-file-name "/tmp/test-notes-2")))))
+
+(ert-deftest orgx-add-notes-to-agenda-list-and-file-test ()
+  "Preserve existing agenda entries and handle Denote directory lists."
+  (let ((org-directory "/tmp/org-a")
+        (denote-directory '("/tmp/denote-a" "/tmp/denote-b"))
+        (user-org-directories nil)
+        (org-agenda-files '("/tmp/existing" "/tmp/denote-a/")))
+    (cl-letf (((symbol-function 'denote-directories)
+               (lambda () '("/tmp/denote-a" "/tmp/denote-b" "/tmp/silo"))))
+      (orgx-add-notes-to-agenda))
+    (should (equal org-agenda-files
+                   '("/tmp/existing" "/tmp/denote-a/" "/tmp/org-a" "/tmp/denote-b" "/tmp/silo"))))
+  (let ((org-agenda-files "/tmp/agenda-list"))
+    (cl-letf (((symbol-function 'display-warning) #'ignore))
+      (orgx-add-notes-to-agenda))
+    (should (equal org-agenda-files "/tmp/agenda-list"))))
+
+(ert-deftest orgx-add-denote-directories-after-load-test ()
+  "Loading Denote refreshes agenda directories once."
+  (let ((after-load-functions '(orgx--add-denote-directories-after-load))
+        called)
+    (cl-letf (((symbol-function 'featurep) (lambda (feature &rest _) (eq feature 'denote)))
+              ((symbol-function 'orgx-add-notes-to-agenda) (lambda () (setq called t))))
+      (orgx--add-denote-directories-after-load "denote.el"))
+    (should called)
+    (should-not (memq #'orgx--add-denote-directories-after-load after-load-functions))))
 
 (ert-deftest orgx-command-map-capture-submap-test ()
   "c in orgx-command-map leads to the capture submap."
