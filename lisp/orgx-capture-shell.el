@@ -22,6 +22,7 @@
 
 (require 'cl-lib)
 (require 'comint)
+(require 'button)
 (require 'seq)
 (require 'subr-x)
 (require 'org)
@@ -331,7 +332,7 @@ re-leveled to be children of the target.  Returns a record
                         (let ((pos (point)))
                           (insert text "\n")
                           (save-buffer)
-                          (list expanded pos text)))))))
+                          (list expanded pos text (copy-marker pos t))))))))
           (push rec orgx-capture-shell-undo-ring)
           (when (> (length orgx-capture-shell-undo-ring) orgx-capture-shell-undo-ring-max)
             (setq orgx-capture-shell-undo-ring
@@ -570,6 +571,50 @@ Returns a message string."
    ("c" "Capture" orgx-capture-shell-form-commit)
    ("q" "Cancel" transient-quit-one)])
 
+;;; Recent captures
+
+(defun orgx-capture-shell--visit-recent (button)
+  "Visit the captured entry described by BUTTON."
+  (let* ((record (button-get button 'orgx-capture-record))
+         (marker (nth 3 record))
+         (text (nth 2 record))
+         (buffer (find-file-noselect (nth 0 record)))
+         (position
+          (with-current-buffer buffer
+            (save-restriction
+              (widen)
+              (save-excursion
+                (cond
+                 ((and (markerp marker) (eq (marker-buffer marker) buffer))
+                  (goto-char marker)
+                  (unless (looking-at-p (regexp-quote text))
+                    (user-error "Capture no longer found in %s" (nth 0 record)))
+                  (point))
+                 ((progn (goto-char (point-min)) (search-forward text nil t))
+                  (match-beginning 0))
+                 (t (user-error "Capture no longer found in %s" (nth 0 record)))))))))
+    (pop-to-buffer buffer)
+    (unless (<= (point-min) position (point-max))
+      (widen))
+    (goto-char position)
+    (when (derived-mode-p 'org-mode)
+      (org-show-context))))
+
+(defun orgx-capture-shell--recent-list ()
+  "Return the recent captures as clickable buttons."
+  (with-temp-buffer
+    (seq-do
+     (lambda (record)
+       (insert "- ")
+       (insert-text-button
+        (format "[%s] %s" (file-name-nondirectory (nth 0 record))
+                (string-trim (nth 2 record)))
+        'action #'orgx-capture-shell--visit-recent
+        'follow-link t 'orgx-capture-record record)
+       (insert "\n"))
+     orgx-capture-shell-undo-ring)
+    (string-trim-right (buffer-string))))
+
 ;;; Slash command dispatcher
 
 (defun orgx-capture-shell--prompt-string ()
@@ -629,11 +674,7 @@ Returns a message string."
        (orgx-capture-shell--undo-last))
       ((or "recent" "list")
        (if orgx-capture-shell-undo-ring
-           (mapconcat (lambda (rec)
-                        (format "- [%s] %s"
-                                (file-name-nondirectory (nth 0 rec))
-                                (string-trim (nth 2 rec))))
-                      orgx-capture-shell-undo-ring "\n")
+           (orgx-capture-shell--recent-list)
          "No recent captures."))
       ("clear"
        (comint-clear-buffer)

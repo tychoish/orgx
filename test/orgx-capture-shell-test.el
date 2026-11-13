@@ -715,5 +715,52 @@
       (should (equal (orgx-capture-shell-test--contents file)
                      "* Tasks\n** old\n** TODO new\n** Archive :ARCHIVE:\n")))))
 
+(ert-deftest orgx-capture-shell-recent-buttons-follow-moved-entries-test ()
+  "Recent links visit their entries even after another capture is prepended."
+  (orgx-capture-shell-test--with-file "* Tasks\n"
+    (orgx-capture-shell--insert-entry file "Tasks" "* TODO first" t)
+    (orgx-capture-shell--insert-entry file "Tasks" "* TODO second" t)
+    (let* ((output (orgx-capture-shell--execute-slash-command "/recent"))
+           (buffer (get-file-buffer file)))
+      (with-temp-buffer
+        (insert output)
+        (goto-char (point-min))
+        (search-forward "first")
+        (let ((button (button-at (1- (point)))))
+          (should button)
+          (save-window-excursion
+            (button-activate button)
+            (should (eq (current-buffer) buffer))
+            (should (looking-at "\*\* TODO first"))))))))
+
+(ert-deftest orgx-capture-shell-recent-deleted-entry-test ()
+  "Following a deleted capture reports it missing."
+  (orgx-capture-shell-test--with-file "* Tasks\n"
+    (orgx-capture-shell--insert-entry file "Tasks" "* TODO first" t)
+    (let* ((output (orgx-capture-shell--execute-slash-command "/recent"))
+           (buffer (get-file-buffer file)))
+      (with-temp-buffer
+        (insert output)
+        (let ((button (button-at 4)))
+          (orgx-capture-shell--undo-last)
+          (save-window-excursion
+            (should-error (button-activate button) :type 'user-error)))))))
+
+(ert-deftest orgx-capture-shell-recent-preserves-accessible-narrowing-test ()
+  "Following an accessible capture preserves the target buffer narrowing."
+  (orgx-capture-shell-test--with-file "* Tasks\n"
+    (orgx-capture-shell--insert-entry file "Tasks" "* TODO first" t)
+    (let ((output (orgx-capture-shell--execute-slash-command "/recent"))
+          (buffer (get-file-buffer file)))
+      (with-current-buffer buffer
+        (narrow-to-region (progn (goto-char (point-min)) (forward-line 1) (point))
+                          (point-max)))
+      (with-temp-buffer
+        (insert output)
+        (save-window-excursion
+          (button-activate (button-at 4))
+          (should (buffer-narrowed-p))
+          (should (looking-at "\\*\\* TODO first")))))))
+
 (provide 'orgx-capture-shell-test)
 ;;; orgx-capture-shell-test.el ends here
