@@ -366,5 +366,32 @@ KEYS are the required string arguments.  FILE must be allowed (see
          (error "`target_section' must be a string"))
        (orgx-entry-append-note (plist-get args :note) pos section)))))
 
+(defun orgx-mcp--entry-json (entry file)
+  "Convert ENTRY plist from `orgx-entry-get' into a JSON-safe plist for FILE."
+  (let ((ht (make-hash-table :test #'equal)))
+    (dolist (pair (plist-get entry :properties))
+      (puthash (car pair) (cdr pair) ht))
+    (list :file file
+          :heading (or (plist-get entry :heading) "")
+          :todo (plist-get entry :todo)
+          :properties ht
+          :body (or (plist-get entry :body) "")
+          :children (vconcat (mapcar (lambda (c) (orgx-mcp--entry-json c file))
+                                     (plist-get entry :children))))))
+
+(mcpkit-register-tool 'org_heading_get 'orgx
+  :description "Get the details of the heading whose match_property equals match_value (heading, TODO state, properties, body, and children)."
+  :input-schema `(:type "object"
+                  :properties ,orgx-mcp--match-schema
+                  :required ["file" "match_property" "match_value"])
+  (hitl-plan-mcp--guard
+    (orgx-mcp--string-args args '(:file :match_property :match_value))
+    (let* ((file (orgx-bulk--check-file (plist-get args :file)))
+           (enable-local-variables nil)
+           (enable-dir-local-variables nil)
+           (entry (orgx-entry-read-in-file
+                   file (plist-get args :match_property) (plist-get args :match_value))))
+      (orgx-mcp--entry-json entry file))))
+
 (provide 'orgx-mcp)
 ;;; orgx-mcp.el ends here

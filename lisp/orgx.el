@@ -1266,5 +1266,64 @@ a plist (:file FILE :heading TITLE)."
           (save-buffer)
           (list :file file :heading title))))))
 
+(defun orgx-entry-get (&optional pos)
+  "Return a plist describing the entry at POS (default point).
+The plist contains:
+  :heading    Heading title without TODO, tags, or priority
+  :todo       TODO keyword (string or nil)
+  :properties Alist of drawer properties ((NAME . VALUE) ...)
+  :body       Entry body text between drawers and first child heading
+  :children   List of `orgx-entry-get' plists for direct child headings."
+  (orgx--with-entry pos
+    (let* ((level (org-current-level))
+           (end (save-excursion (org-end-of-subtree t t)))
+           (heading (org-get-heading t t t t))
+           (todo (org-get-todo-state))
+           (body-end (save-excursion
+                       (end-of-line)
+                       (if (outline-next-heading) (point) (point-max))))
+           (range (org-get-property-block))
+           (props (when range
+                    (save-excursion
+                      (goto-char (car range))
+                      (let (res)
+                        (while (re-search-forward "^[ \t]*:\\([A-Za-z0-9_@-]+\\):[ \t]*\\(.*\\)$" (cdr range) t)
+                          (push (cons (match-string 1) (string-trim (match-string 2))) res))
+                        (nreverse res)))))
+           (body (save-excursion
+                   (org-end-of-meta-data t)
+                   (let ((b-start (min (point) body-end)))
+                     (string-trim (buffer-substring-no-properties b-start body-end)))))
+           (children nil))
+      (save-excursion
+        (while (and (outline-next-heading) (< (point) end))
+          (when (= (org-current-level) (1+ level))
+            (push (orgx-entry-get (point)) children))))
+      (list :heading heading
+            :todo todo
+            :properties props
+            :body body
+            :children (nreverse children)))))
+
+(defun orgx-entry-read-in-file (file match-property match-value)
+  "Visit FILE and return `orgx-entry-get' for the heading matching MATCH-PROPERTY.
+Signal an error if no heading matches.  Prompts are suppressed."
+  (let* ((file (expand-file-name file))
+         (buf (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) t))
+                         ((symbol-function 'yes-or-no-p) (lambda (&rest _) t)))
+                (find-file-noselect file))))
+    (with-current-buffer buf
+      (unless (derived-mode-p 'org-mode) (org-mode))
+      (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) t))
+                ((symbol-function 'yes-or-no-p) (lambda (&rest _) t)))
+        (let* ((inhibit-read-only t)
+               (marker (or (orgx-entry-find-by-property match-property match-value)
+                           (error "No heading in %s with %s = %s"
+                                  (file-name-nondirectory file)
+                                  match-property match-value))))
+          (unwind-protect
+              (orgx-entry-get marker)
+            (set-marker marker nil)))))))
+
 (provide 'orgx)
 ;;; orgx.el ends here

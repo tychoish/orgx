@@ -688,4 +688,25 @@ and switches to the one selected via `annotated-completing-read'."
         (should (string-match-p "body\n- \\[[^]]+\\] line1\n  line2\n\\'"
                                 (buffer-string)))))))
 
+(ert-deftest orgx-entry-get-test ()
+  (with-temp-buffer
+    (let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+      (orgx-test--org-mode)
+      (insert "* TODO Task Title\n:PROPERTIES:\n:CUSTOM_ID: parent-1\n:PR: 42\n:END:\nParent body text\n** fix-ci\n:PROPERTIES:\n:ACTION: fix-ci\n:END:\nChild body\n** threads\n")
+      (org-set-regexps-and-options)
+      (let ((res (orgx-entry-get (point-min))))
+        (should (equal "Task Title" (plist-get res :heading)))
+        (should (equal "TODO" (plist-get res :todo)))
+        (should (equal "Parent body text" (plist-get res :body)))
+        (should (equal '(("CUSTOM_ID" . "parent-1") ("PR" . "42"))
+                       (plist-get res :properties)))
+        (let ((children (plist-get res :children)))
+          (should (= 2 (length children)))
+          (should (equal "fix-ci" (plist-get (car children) :heading)))
+          (should (equal nil (plist-get (car children) :todo)))
+          (should (equal "Child body" (plist-get (car children) :body)))
+          (should (equal '(("ACTION" . "fix-ci")) (plist-get (car children) :properties)))
+          (should (equal "threads" (plist-get (cadr children) :heading)))
+          (should (equal "" (plist-get (cadr children) :body))))))))
+
 ;;; orgx-test.el ends here

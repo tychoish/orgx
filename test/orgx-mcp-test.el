@@ -96,7 +96,9 @@ Signal an error carrying the handler's error message on failure."
   (should (seq-every-p (lambda (name) (map-elt (mcpkit-service-tools orgx-mcp-service) name))
                        '("org_capture_task" "org_capture_journal" "org_capture_clock_in"
                          "bulk_ops" "bulk_plan_create" "bulk_plan_list"
-                         "bulk_plan_status" "bulk_plan_discard" "bulk_plan_execute"))))
+                         "bulk_plan_status" "bulk_plan_discard" "bulk_plan_execute"
+                         "org_heading_get" "org_heading_set_property"
+                         "org_heading_set_todo" "org_heading_append_note"))))
 
 (ert-deftest orgx-mcp-capture-tools-test ()
   (let ((calls nil))
@@ -393,10 +395,49 @@ Signal an error carrying the handler's error message on failure."
                          (list :file f :match_property "CUSTOM_ID"
                                :match_value "nope" :state "DONE"))
                         :error)))
+    (should (string-match-p
+             "No heading"
+             (plist-get (orgx-mcp-test--call
+                         "org_heading_get"
+                         (list :file f :match_property "CUSTOM_ID"
+                               :match_value "nope"))
+                        :error)))
     (should (plist-get (orgx-mcp-test--call
                         "org_heading_set_todo"
                         (list :file f :match_property "CUSTOM_ID"))
+                       :error))
+    (should (plist-get (orgx-mcp-test--call
+                        "org_heading_get"
+                        (list :file f :match_property "CUSTOM_ID"))
                        :error))))
+
+(ert-deftest orgx-mcp-heading-get-test ()
+  (orgx-mcp-test--with-file f orgx-mcp-test--entry-org
+    (let ((res (orgx-mcp-test--call
+                "org_heading_get"
+                (list :file f :match_property "CUSTOM_ID" :match_value "one"))))
+      (should-not (plist-get res :error))
+      (should (equal (plist-get res :file) f))
+      (should (equal "First" (plist-get res :heading)))
+      (should (equal "TODO" (plist-get res :todo)))
+      (should (equal "Body text." (plist-get res :body)))
+      (should (equal "one" (gethash "CUSTOM_ID" (plist-get res :properties))))
+      (let ((children (plist-get res :children)))
+        (should (vectorp children))
+        (should (= 1 (length children)))
+        (should (equal "Child" (plist-get (aref children 0) :heading)))
+        (should (equal "child body" (plist-get (aref children 0) :body)))))))
+
+(ert-deftest orgx-mcp-heading-get-reject-unlisted-file-test ()
+  (orgx-mcp-test--with-file f orgx-mcp-test--entry-org
+    (let ((other (make-temp-file "orgx-mcp-other-" nil ".org" orgx-mcp-test--entry-org)))
+      (unwind-protect
+          (orgx-mcp-test--no-prompts
+            (let ((res (orgx-mcp-test--call
+                        "org_heading_get"
+                        (list :file other :match_property "CUSTOM_ID" :match_value "one"))))
+              (should (string-match-p "File not allowed" (plist-get res :error)))))
+        (delete-file other)))))
 
 ;;; Prompt suppression and allowlist
 
