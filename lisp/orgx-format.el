@@ -25,6 +25,7 @@
 (require 'seq)
 (require 'subr-x)
 
+(declare-function org-element--property "org-element-ast")
 (declare-function sprite-direct-run "sprite-direct")
 
 ;;; Configuration
@@ -114,7 +115,7 @@ Optionally trim blank lines at the start and end of sections according to
         (let ((headlines (nreverse (org-element-map (org-element-parse-buffer)
                                        'headline #'identity))))
           (dolist (hl headlines)
-            (goto-char (org-element-begin hl))
+            (goto-char (org-element-property :begin hl))
             (org-end-of-meta-data nil)
             (while (and (not (eobp))
                         (progn (skip-chars-forward " \t") (eolp)))
@@ -137,8 +138,8 @@ Org-mode syntax (including hard line breaks, lists, and quote blocks)."
       (let ((fill-column orgx-format-line-length))
         (dolist (p (nreverse (org-element-map (org-element-parse-buffer)
                                  'paragraph #'identity)))
-          (when-let* ((pos (or (org-element-contents-begin p)
-                               (org-element-begin p))))
+          (when-let* ((pos (or (org-element-property :contents-begin p)
+                               (org-element-property :begin p))))
             (goto-char pos)
             (org-fill-element)))))))
 
@@ -150,8 +151,8 @@ Org-mode syntax (including hard line breaks, lists, and quote blocks)."
       (dolist (table (nreverse (org-element-map (org-element-parse-buffer)
                                    'table #'identity)))
         (when (eq (org-element-property :type table) 'org)
-          (goto-char (or (org-element-post-affiliated table)
-                         (org-element-begin table)))
+          (goto-char (or (org-element-property :post-affiliated table)
+                         (org-element-property :begin table)))
           (org-table-align))))))
 
 (defun orgx-format-section-at-point ()
@@ -256,7 +257,7 @@ Returns a list of diagnostic plists:
             ;; Check blank lines immediately following headings
             (dolist (hl (org-element-map ast 'headline #'identity))
               (save-excursion
-                (goto-char (org-element-begin hl))
+                (goto-char (org-element-property :begin hl))
                 (org-end-of-meta-data nil)
                 (when (and (not (eobp))
                            (progn (skip-chars-forward " \t") (eolp)))
@@ -268,10 +269,10 @@ Returns a list of diagnostic plists:
             ;; Check line length in prose paragraphs
             (dolist (p (org-element-map ast 'paragraph #'identity))
               (save-excursion
-                (let ((end (or (org-element-contents-end p)
-                               (org-element-end p))))
-                  (goto-char (or (org-element-contents-begin p)
-                                 (org-element-begin p)))
+                (let ((end (or (org-element-property :contents-end p)
+                               (org-element-property :end p))))
+                  (goto-char (or (org-element-property :contents-begin p)
+                                 (org-element-property :begin p)))
                   (while (< (point) end)
                     (let ((line-len (- (line-end-position)
                                        (line-beginning-position))))

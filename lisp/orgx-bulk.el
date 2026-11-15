@@ -787,7 +787,7 @@ existing keyword line is rewritten; the current buffer must visit FILE."
                             nil t)))
             (let ((current (string-trim (or (org-element-property :value kw) ""))))
               (unless (string-equal current new)
-                (goto-char (org-element-begin kw))
+                (goto-char (org-element-property :begin kw))
                 (delete-region (point) (line-end-position))
                 (insert (format "#+execution_status: %s" new))))))))))
 
