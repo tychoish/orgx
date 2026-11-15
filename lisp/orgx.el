@@ -330,9 +330,12 @@ Tag comparison is case-insensitive."
 
 ;;;###autoload
 (defun orgx-archive-done-tasks-to-archive-sibling ()
-  "Archive completed direct children, or siblings when there are no children.
-Only headings at the selected level are processed; descendants of those
-headings move with their parent and are not archived independently."
+  "Archive completed direct children, or siblings when on a task.
+If point is on a task (a heading with a TODO state), archive completed
+siblings at the same level even if the task has subtasks.  If point is
+on a container heading (without a TODO state) that has children, archive
+its completed direct children.  Only headings at the selected level are
+processed; descendants move with their parent."
   (interactive)
   (let (targets parent)
     (save-excursion
@@ -341,12 +344,14 @@ headings move with their parent and are not archived independently."
          ((org-before-first-heading-p))
          (t
           (org-back-to-heading t)
-          (if (or (save-excursion (org-goto-first-child))
-                  (org-up-heading-safe))
+          (if (and (not (org-get-todo-state))
+                   (save-excursion (org-goto-first-child)))
               (progn
                 (setq parent (point))
                 (org-narrow-to-subtree))
-            nil)))
+            (when (org-up-heading-safe)
+              (setq parent (point))
+              (org-narrow-to-subtree)))))
         (org-map-entries
          (lambda ()
            (when (and (equal parent (save-excursion

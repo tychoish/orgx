@@ -73,6 +73,18 @@ Other tests may leave `orgx-mode-turn-on' on the hook."
     (should (string-match-p "\\* TODO Open\n\\*\\* DONE Nested" (buffer-string)))
     (should (string-match-p "\\*\\* DONE Finished" (buffer-string)))))
 
+(ert-deftest orgx-archive-done-top-level-with-subtasks-test ()
+  "On a top-level task that has subtasks, archive completed top-level siblings."
+  (with-temp-buffer
+    (orgx-test--org-mode)
+    (insert "* DONE Completed Task\n** Child note or subtask\n* TODO Ongoing Task\n* DONE Another Done\n* Archive :ARCHIVE:\n")
+    (goto-char (point-min))
+    (orgx-archive-done-tasks-to-archive-sibling)
+    (should (string-match-p "\\* TODO Ongoing Task" (buffer-string)))
+    (should (string-match-p "\\* Archive :ARCHIVE:\n\\*\\* DONE Another Done" (buffer-string)))
+    (should (string-match-p "\\*\\* DONE Completed Task\n:PROPERTIES:" (buffer-string)))
+    (should (string-match-p "\\*\\*\\* Child note or subtask" (buffer-string)))))
+
 (ert-deftest orgx-archive-done-skipped-level-and-region-test ()
   "Use actual parentage and ignore an active region during archiving."
   (with-temp-buffer
