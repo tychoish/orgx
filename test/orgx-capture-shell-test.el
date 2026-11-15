@@ -855,5 +855,18 @@
       (should (string-match-p "\\* TODO First Line\\.\\.\\." output))
       (should-not (string-match-p "Second Line" output)))))
 
+(ert-deftest orgx-capture-shell-flyspell-corfu-setup-test ()
+  "Flyspell and corfu setup is configured for text mode with short command support."
+  (with-temp-buffer
+    (orgx-capture-shell-mode)
+    (should (eq (get 'orgx-capture-shell-mode 'flyspell-mode-predicate)
+                #'orgx-capture-shell--flyspell-verify))
+    (insert "hello /target world")
+    (goto-char (point-min))
+    (search-forward "hello")
+    (should (orgx-capture-shell--flyspell-verify))
+    (search-forward "target")
+    (should-not (orgx-capture-shell--flyspell-verify))))
+
 (provide 'orgx-capture-shell-test)
 ;;; orgx-capture-shell-test.el ends here

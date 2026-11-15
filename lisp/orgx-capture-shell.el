@@ -127,6 +127,16 @@ never lands after a trailing child tagged with `org-archive-tag'."
   :type 'integer
   :group 'orgx-capture-shell)
 
+(defcustom orgx-capture-shell-enable-flyspell t
+  "When non-nil, enable `flyspell-mode' in `orgx-capture-shell-mode'."
+  :type 'boolean
+  :group 'orgx-capture-shell)
+
+(defcustom orgx-capture-shell-enable-corfu t
+  "When non-nil, enable `corfu-mode' in `orgx-capture-shell-mode'."
+  :type 'boolean
+  :group 'orgx-capture-shell)
+
 (defvar orgx-capture-shell-undo-ring nil
   "Global list of recently captured items: ((FILE POSITION TEXT)...).")
 
@@ -869,6 +879,21 @@ Completes command names, `/template' names, and `/target' files and headlines."
   "C-j" #'newline
   "C-<return>" #'orgx-capture-shell-send-form)
 
+(defun orgx-capture-shell--flyspell-verify ()
+  "Verification predicate for `flyspell-mode' in `orgx-capture-shell-mode'.
+Returns non-nil if the word at point should be spellchecked.
+Ignores prompts, slash commands, and short syntax."
+  (save-excursion
+    (let* ((proc (get-buffer-process (current-buffer)))
+           (pmark (and proc (process-mark proc)))
+           (word-beg (progn (backward-word 1) (point))))
+      (and
+       (or (not pmark) (>= word-beg (marker-position pmark)))
+       (not (eq (char-before word-beg) ?/))
+       (not (looking-at-p "/[a-zA-Z0-9_-]+"))))))
+
+(put 'orgx-capture-shell-mode 'flyspell-mode-predicate #'orgx-capture-shell--flyspell-verify)
+
 (define-derived-mode orgx-capture-shell-mode comint-mode "orgx-shell"
   "Major mode for the interactive `orgx-capture-shell' REPL.
 \\{orgx-capture-shell-mode-map}"
@@ -877,6 +902,16 @@ Completes command names, `/template' names, and `/target' files and headlines."
   (setq comint-input-sender #'orgx-capture-shell-input-sender)
   (setq-local fill-column 80)
   (add-hook 'completion-at-point-functions #'orgx-capture-shell-completion-at-point nil t)
+
+  ;; Autocomplete and spellcheck
+  (when (and orgx-capture-shell-enable-corfu (fboundp 'corfu-mode))
+    (setq-local corfu-auto t)
+    (setq-local corfu-auto-prefix 1)
+    (corfu-mode 1))
+  (when (and orgx-capture-shell-enable-flyspell (fboundp 'flyspell-mode))
+    (setq-local flyspell-generic-check-word-predicate
+                #'orgx-capture-shell--flyspell-verify)
+    (flyspell-mode 1))
 
   ;; Resolve initial target
   (let ((target (orgx-capture-shell--resolve-target)))
