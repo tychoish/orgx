@@ -112,7 +112,9 @@ Saves previous read-only status and makes BUFFER read-only."
         (and (fboundp 'org-in-drawer-p) (org-in-drawer-p)))))
 
 (defun orgx-format--trim-section-blank-lines (beg end)
-  "Delete excess blank lines at the start (and optionally end) of region BEG to END."
+  "Delete excess blank lines in region BEG to END.
+Optionally trim blank lines at the start and end of the region according to
+`orgx-format-trim-section-start' and `orgx-format-trim-section-end'."
   (save-excursion
     (save-restriction
       (narrow-to-region beg end)
@@ -334,7 +336,8 @@ Returns a list of diagnostic plists:
 (defun orgx-format-batch (files &optional revert-open)
   "Format a list of Org FILES.
 Locks open buffers locally, formats the files, then optionally reverts
-and unlocks open buffers.  Uses sprite workers when `sprite-direct' is available."
+and unlocks open buffers if REVERT-OPEN is non-nil.
+Uses sprite workers when `sprite-direct' is available."
   (interactive (list (list (buffer-file-name))))
   (let ((locked-count 0))
     ;; Lock currently open buffers
