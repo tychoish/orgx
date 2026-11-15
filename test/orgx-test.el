@@ -31,6 +31,16 @@ Other tests may leave `orgx-mode-turn-on' on the hook."
     (should (string-match-p "^<[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\} [0-9]\\{2\\}:[0-9]\\{2\\}:[0-9]\\{2\\} [^>]+>$" long-now))
     (should (string-match-p "^<[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}>$" short-now))))
 
+(ert-deftest orgx-insert-date-test ()
+  "Test inserting Org date stamps at point."
+  (with-temp-buffer
+    (org-insert-date)
+    (should (string-match-p "^<[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\} [A-Za-z]+>$" (buffer-string))))
+  (with-temp-buffer
+    (orgx-insert-date '(4))
+    (should (string-match-p "^\\[[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\} [A-Za-z]+\\]$" (buffer-string))))
+  (should (eq #'orgx-insert-date (keymap-lookup orgx-command-map "d"))))
+
 (ert-deftest orgx-done-state-match-test ()
   "Test done state match generator."
   (let ((org-done-keywords '("DONE" "CANCELLED")))

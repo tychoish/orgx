@@ -101,6 +101,22 @@ When SHORT is non-nil, format as date-only."
                         orgx-date-spec-datetime)
                       (current-time)))
 
+;;;###autoload
+(defun orgx-insert-date (&optional arg)
+  "Insert an Org date stamp at point.
+Without prefix ARG, insert an active date stamp `<YYYY-MM-DD Day>'.
+With single prefix ARG (\\[universal-argument]), insert an inactive date
+stamp `[YYYY-MM-DD Day]'.
+With double prefix ARG (\\[universal-argument] \\[universal-argument]),
+include the current time."
+  (interactive "P")
+  (let* ((with-time (equal arg '(16)))
+         (inactive (or (equal arg '(4)) (equal arg 4))))
+    (org-insert-time-stamp (current-time) with-time inactive)))
+
+;;;###autoload (defalias 'org-insert-date #'orgx-insert-date)
+(defalias 'org-insert-date #'orgx-insert-date)
+
 ;;; TOC priority preservation (for toc-org)
 
 (defvar orgx--toc-priorities nil)
@@ -665,7 +681,7 @@ buffer position."
 (keymap-set orgx-command-map "b" #'orgx-bulk-todo-state)
 (keymap-set orgx-command-map "B" #'orgx-bulk-resume)
 (keymap-set orgx-command-map "c" orgx-capture-map)
-(keymap-set orgx-command-map "d" #'orgx-date-now)
+(keymap-set orgx-command-map "d" #'orgx-insert-date)
 (keymap-set orgx-command-map "f" #'orgx-agenda-files-open)
 (keymap-set orgx-command-map "C-f" orgx-archive-map)
 (keymap-set orgx-command-map "g" orgx-gist-map)
