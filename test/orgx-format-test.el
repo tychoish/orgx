@@ -88,5 +88,116 @@
       (when (file-exists-p file)
         (delete-file file)))))
 
+(ert-deftest orgx-format-hardline-breaks-preserved-test ()
+  "Hard line breaks with \\\\ are preserved and not joined."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Hardlines\nLine 1 is quite long and goes on for a bit\\\\\nLine 2 is also long and continues for a bit\\\\\nLine 3 is the end\n")
+    (let ((orgx-format-line-length 30))
+      (orgx-format-buffer))
+    (let ((content (buffer-string)))
+      (should (string-match-p "Line 1 is quite long and goes\non for a bit\\\\" content))
+      (should (string-match-p "Line 2 is also long and\ncontinues for a bit\\\\" content))
+      (should (string-match-p "Line 3 is the end" content)))))
+
+(ert-deftest orgx-format-plain-list-items-preserved-test ()
+  "Plain list items are reflowed individually without merging items."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* List Section\n- item 1 with words that go on and on and should wrap onto the next line\n- item 2 with words that go on and on and should wrap onto the next line\n- item 3 with words that go on and on and should wrap onto the next line\n")
+    (let ((orgx-format-line-length 40))
+      (orgx-format-buffer))
+    (let ((content (buffer-string)))
+      (should (string-match-p "- item 1 with words that go on and on\n  and should wrap onto the next line" content))
+      (should (string-match-p "- item 2 with words that go on and on\n  and should wrap onto the next line" content))
+      (should (string-match-p "- item 3 with words that go on and on\n  and should wrap onto the next line" content)))))
+
+(ert-deftest orgx-format-checkboxes-preserved-test ()
+  "List items with checkboxes preserve checkboxes and indentation."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Checkbox Section\n- [ ] todo item with a long description that needs to be reflowed cleanly\n- [X] done item with another long description that needs to be reflowed cleanly\n")
+    (let ((orgx-format-line-length 40))
+      (orgx-format-buffer))
+    (let ((content (buffer-string)))
+      (should (string-match-p "- \\[ \\] todo item with a long description\n  that needs to be reflowed cleanly" content))
+      (should (string-match-p "- \\[X\\] done item with another long\n  description that needs to be reflowed\n  cleanly" content)))))
+
+(ert-deftest orgx-format-verse-block-preserved-test ()
+  "Verse blocks preserve newlines and are not reflowed."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Verse Section\n#+begin_verse\nLine 1\nLine 2\nLine 3\n#+end_verse\n")
+    (let ((orgx-format-line-length 40))
+      (orgx-format-buffer))
+    (let ((content (buffer-string)))
+      (should (string-match-p "#\\+begin_verse\nLine 1\nLine 2\nLine 3\n#\\+end_verse" content)))))
+
+(ert-deftest orgx-format-quote-block-test ()
+  "Quote blocks reflow paragraph text while keeping block delimiters intact."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Quote Section\n#+begin_quote\nThis is a long quote line that should be wrapped nicely within the quote block without breaking the quote syntax.\n#+end_quote\n")
+    (let ((orgx-format-line-length 40))
+      (orgx-format-buffer))
+    (let ((content (buffer-string)))
+      (should (string-match-p "#\\+begin_quote\nThis is a long quote line that should be\nwrapped nicely within the quote block\nwithout breaking the quote syntax\\.\n#\\+end_quote" content)))))
+
+(ert-deftest orgx-format-description-list-test ()
+  "Description lists preserve term syntax and wrap definition text."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Description Section\n- Term :: Description of term with long description text that should wrap cleanly.\n")
+    (let ((orgx-format-line-length 40))
+      (orgx-format-buffer))
+    (let ((content (buffer-string)))
+      (should (string-match-p "- Term :: Description of term with long\n  description text that should wrap\n  cleanly\\." content)))))
+
+(ert-deftest orgx-format-no-regexp-reformatting-rules-test ()
+  "Assert that orgx-format.el contains no regexp-based reformatting rules."
+  (let* ((format-el (or (locate-library "orgx-format.el")
+                        (locate-library "orgx-format")
+                        (expand-file-name "lisp/orgx-format.el" default-directory)))
+         (forms nil)
+         (forbidden '(re-search-forward
+                      re-search-backward
+                      looking-at
+                      looking-at-p
+                      string-match
+                      string-match-p
+                      replace-regexp-in-string)))
+    (should (and format-el (file-exists-p format-el)))
+    (with-temp-buffer
+      (insert-file-contents format-el)
+      (goto-char (point-min))
+      (while (ignore-errors
+               (let ((form (read (current-buffer))))
+                 (push form forms)
+                 t))))
+    (let ((reformat-fns '(orgx-format--reflow-paragraphs
+                          orgx-format--realign-tables
+                          orgx-format--trim-section-blank-lines
+                          orgx-format-region
+                          orgx-format-buffer
+                          orgx-format-section-at-point))
+          (contains-forbidden
+           (lambda (tree)
+             (let (found)
+               (letrec ((walk (lambda (x)
+                                (cond
+                                 ((memq x forbidden)
+                                  (push x found))
+                                 ((consp x)
+                                  (funcall walk (car x))
+                                  (funcall walk (cdr x)))))))
+                 (funcall walk tree))
+               found))))
+      (dolist (form forms)
+        (when (and (consp form)
+                   (memq (car form) '(defun defsubst cl-defun))
+                   (memq (cadr form) reformat-fns))
+          (let ((bad-calls (funcall contains-forbidden (cddr form))))
+            (should-not bad-calls)))))))
+
 (provide 'orgx-format-test)
 ;;; orgx-format-test.el ends here
