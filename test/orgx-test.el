@@ -709,4 +709,75 @@ and switches to the one selected via `annotated-completing-read'."
           (should (equal "threads" (plist-get (cadr children) :heading)))
           (should (equal "" (plist-get (cadr children) :body))))))))
 
+(ert-deftest orgx-agenda-follow-link-test ()
+  "In agenda buffers, org-agenda-switch-to follows heading link directly."
+  (let ((file (make-temp-file "orgx-test-" nil ".org"))
+        (opened nil)
+        (agenda-buf nil))
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert "* TODO [[myproto:target-link][Linked Task]]\n* TODO Plain Task\n"))
+          (org-link-set-parameters "myproto" :follow (lambda (path _) (setq opened path)))
+          (let ((org-agenda-files (list file)))
+            (org-todo-list)
+            (setq agenda-buf (get-buffer org-agenda-buffer-name))
+            (with-current-buffer agenda-buf
+              (goto-char (point-min))
+              (org-agenda-next-item 1)
+              (orgx--ad-org-agenda-switch-to (lambda (&rest _) (error "Should not reach orig-fun")))
+              (should (equal "target-link" opened)))))
+      (when (buffer-live-p agenda-buf)
+        (kill-buffer agenda-buf))
+      (when (file-exists-p file)
+        (delete-file file)))))
+
+(ert-deftest orgx-agenda-follow-link-prefix-arg-test ()
+  "With prefix argument, org-agenda-switch-to delegates to orig-fun."
+  (let ((file (make-temp-file "orgx-test-" nil ".org"))
+        (orig-called nil)
+        (agenda-buf nil))
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert "* TODO [[https://example.com][Linked Task]]\n"))
+          (let ((org-agenda-files (list file)))
+            (org-todo-list)
+            (setq agenda-buf (get-buffer org-agenda-buffer-name))
+            (with-current-buffer agenda-buf
+              (goto-char (point-min))
+              (org-agenda-next-item 1)
+              (let ((current-prefix-arg '(4)))
+                (orgx--ad-org-agenda-switch-to (lambda (&rest _) (setq orig-called t))))
+              (should orig-called))))
+      (when (buffer-live-p agenda-buf)
+        (kill-buffer agenda-buf))
+      (when (file-exists-p file)
+        (delete-file file)))))
+
+(ert-deftest orgx-agenda-goto-mouse-follow-link-test ()
+  "In agenda buffers, org-agenda-goto-mouse follows heading link directly."
+  (let ((file (make-temp-file "orgx-test-" nil ".org"))
+        (opened nil)
+        (agenda-buf nil))
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert "* TODO [[myproto:mouse-link][Mouse Linked Task]]\n"))
+          (org-link-set-parameters "myproto" :follow (lambda (path _) (setq opened path)))
+          (let ((org-agenda-files (list file)))
+            (org-todo-list)
+            (setq agenda-buf (get-buffer org-agenda-buffer-name))
+            (with-current-buffer agenda-buf
+              (goto-char (point-min))
+              (search-forward "Mouse Linked Task")
+              (let ((event (list 'mouse-2 (list (selected-window) (point) (cons 0 0) 0))))
+                (orgx--ad-org-agenda-goto-mouse (lambda (&rest _) (error "Should not reach orig-fun"))
+                                               event)
+                (should (equal "mouse-link" opened))))))
+      (when (buffer-live-p agenda-buf)
+        (kill-buffer agenda-buf))
+      (when (file-exists-p file)
+        (delete-file file)))))
+
 ;;; orgx-test.el ends here

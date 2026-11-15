@@ -227,6 +227,59 @@ Updates `local-notes-directory', `org-directory',
   (orgx--background-revbufs)
   (apply orig-fun args))
 
+(defun orgx-agenda-link-at-point ()
+  "Return the org link string at point in an agenda buffer, if any.
+Checks for bracketed links, plain links, or `htmlize-link' text properties."
+  (when (derived-mode-p 'org-agenda-mode)
+    (cond
+     ((org-in-regexp org-link-bracket-re)
+      (match-string-no-properties 0))
+     ((org-in-regexp org-link-any-re)
+      (match-string-no-properties 0))
+     ((let ((uri (plist-get (get-text-property (point) 'htmlize-link) :uri)))
+        (and uri (org-link-unescape uri)))))))
+
+(defun orgx-agenda-entry-link ()
+  "Return the target org link for the current agenda entry, if any.
+If point is on a link, returns that link.  Otherwise, if the heading text
+of the current entry contains a link, returns the first link found."
+  (when (derived-mode-p 'org-agenda-mode)
+    (or (orgx-agenda-link-at-point)
+        (let* ((txt (get-text-property (point) 'txt))
+               (line (buffer-substring-no-properties (line-beginning-position)
+                                                     (line-end-position))))
+          (cond
+           ((and txt (string-match org-link-bracket-re txt))
+            (match-string-no-properties 0 txt))
+           ((and txt (string-match org-link-any-re txt))
+            (match-string-no-properties 0 txt))
+           ((string-match org-link-bracket-re line)
+            (match-string-no-properties 0 line))
+           ((string-match org-link-any-re line)
+            (match-string-no-properties 0 line)))))))
+
+(defun orgx--ad-org-agenda-switch-to (orig-fun &rest args)
+  "Follow link in current agenda entry when present, unless given a prefix arg.
+When called with a prefix argument (e.g. \\[universal-argument]), or when
+the current entry contains no link, call ORIG-FUN with ARGS to switch to
+the underlying Org heading."
+  (interactive "P")
+  (if (and (derived-mode-p 'org-agenda-mode)
+           (not current-prefix-arg)
+           (orgx-agenda-entry-link))
+      (org-link-open-from-string (orgx-agenda-entry-link))
+    (apply orig-fun args)))
+
+(defun orgx--ad-org-agenda-goto-mouse (orig-fun event)
+  "Follow link at mouse click when present in an agenda buffer.
+Otherwise call ORIG-FUN with EVENT."
+  (interactive "e")
+  (mouse-set-point event)
+  (if (and (derived-mode-p 'org-agenda-mode)
+           (orgx-agenda-entry-link))
+      (org-link-open-from-string (orgx-agenda-entry-link))
+    (funcall orig-fun event)))
+
 
 ;;; Task status and archiving
 
@@ -1065,6 +1118,8 @@ Activates `orgx-command-map' under C-c o."
   (advice-add 'toc-org-insert-toc :around #'orgx--toc-bind-priorities)
   (advice-add 'toc-org-hrefify-gh :around #'orgx--toc-hrefify-priority)
   (advice-add 'org-agenda-redo :around #'orgx--ad-org-agenda-redo)
+  (advice-add 'org-agenda-switch-to :around #'orgx--ad-org-agenda-switch-to)
+  (advice-add 'org-agenda-goto-mouse :around #'orgx--ad-org-agenda-goto-mouse)
   (advice-add 'org-link-open-as-file :around #'orgx-link-github-line-support)
   (advice-add 'org-table--shrink-field :filter-args #'orgx--ad-table-shrink-field)
   (add-hook 'org-open-link-functions #'orgx-open-custom-id-slug-fallback)
@@ -1075,6 +1130,8 @@ Activates `orgx-command-map' under C-c o."
   (advice-remove 'toc-org-insert-toc #'orgx--toc-bind-priorities)
   (advice-remove 'toc-org-hrefify-gh #'orgx--toc-hrefify-priority)
   (advice-remove 'org-agenda-redo #'orgx--ad-org-agenda-redo)
+  (advice-remove 'org-agenda-switch-to #'orgx--ad-org-agenda-switch-to)
+  (advice-remove 'org-agenda-goto-mouse #'orgx--ad-org-agenda-goto-mouse)
   (advice-remove 'org-link-open-as-file #'orgx-link-github-line-support)
   (advice-remove 'org-table--shrink-field #'orgx--ad-table-shrink-field)
   (remove-hook 'org-open-link-functions #'orgx-open-custom-id-slug-fallback)
