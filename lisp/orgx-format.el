@@ -1,7 +1,7 @@
 ;;; orgx-format.el --- Functional formatting and linting for Org files -*- lexical-binding: t; -*-
 
 ;;; Commentary:
-;; Functional Org-mode formatter and linter.
+;; Functional Org-mode formatter and linter using native Org-element AST APIs.
 ;;
 ;; Provides:
 ;; - `orgx-format-buffer' and `orgx-format-region' to flow paragraphs,
@@ -11,11 +11,17 @@
 ;; - Incremental yielding between sections using `thread-yield'.
 ;; - Batch formatting (`orgx-format-batch') with buffer locking, revert,
 ;;   and cancellation (`orgx-format-batch-cancel').
+;;
+;; All formatting operations leverage native Org-mode AST parsers (`org-element')
+;; and Org filling/alignment routines (`org-fill-element', `org-table-align',
+;; `org-end-of-meta-data').  No regex-based reformatting rules are used.
 
 ;;; Code:
 
 (require 'org)
+(require 'org-element)
 (require 'org-table)
+(require 'outline)
 (require 'seq)
 (require 'subr-x)
 
@@ -95,86 +101,58 @@ Saves previous read-only status and makes BUFFER read-only."
     (setq orgx-format--locked-buffers nil)
     (message "Cleared %d buffer locks." count)))
 
-;;; Core formatting helpers
-
-(defun orgx-format--in-protected-block-p ()
-  "Return non-nil if point is inside a code block, property drawer, or table."
-  (save-excursion
-    (beginning-of-line)
-    (or (org-at-table-p)
-        (looking-at-p "^[ \t]*:[A-Z_]+:")
-        (looking-at-p "^[ \t]*:END:")
-        (looking-at-p "^[ \t]*#\\+begin_")
-        (looking-at-p "^[ \t]*#\\+end_")
-        (looking-at-p "^[ \t]*#\\+")
-        (looking-at-p "^[ \t]*# ")
-        (org-in-src-block-p)
-        (and (fboundp 'org-in-drawer-p) (org-in-drawer-p)))))
+;;; Core formatting helpers (AST-driven, zero regexp reformatting)
 
 (defun orgx-format--trim-section-blank-lines (beg end)
-  "Delete excess blank lines in region BEG to END.
-Optionally trim blank lines at the start and end of the region according to
+  "Delete excess blank lines in region BEG to END using Org metadata navigation.
+Optionally trim blank lines at the start and end of sections according to
 `orgx-format-trim-section-start' and `orgx-format-trim-section-end'."
   (save-excursion
     (save-restriction
       (narrow-to-region beg end)
-      (goto-char (point-min))
-      ;; If starting at a heading, advance past heading, planning lines, and drawers
-      (when (looking-at-p org-outline-regexp)
-        (forward-line 1)
-        (while (and (not (eobp))
-                    (or (looking-at-p "^[ \t]*\\(SCHEDULED\\|DEADLINE\\|CLOSED\\):")
-                        (looking-at-p "^[ \t]*:[A-Z_]+:")))
-          (if (looking-at-p "^[ \t]*:[A-Z_]+:")
-              (if (re-search-forward "^[ \t]*:END:[ \t]*$" nil t)
-                  (forward-line 1)
-                (forward-line 1))
-            (forward-line 1)))
-        ;; Remove blank lines directly following heading/properties
-        (when orgx-format-trim-section-start
-          (while (and (not (eobp))
-                      (looking-at-p "^[ \t]*$"))
-            (delete-region (point) (line-beginning-position 2)))))
-      ;; Optionally trim blank lines at end of section
+      (when orgx-format-trim-section-start
+        (let ((headlines (nreverse (org-element-map (org-element-parse-buffer)
+                                       'headline #'identity))))
+          (dolist (hl headlines)
+            (goto-char (org-element-begin hl))
+            (org-end-of-meta-data nil)
+            (while (and (not (eobp))
+                        (progn (skip-chars-forward " \t") (eolp)))
+              (delete-region (line-beginning-position)
+                             (min (point-max) (1+ (line-end-position))))))))
       (when orgx-format-trim-section-end
         (goto-char (point-max))
         (skip-chars-backward " \t\n")
-        (delete-region (point) (point-max))
-        (insert "\n")))))
+        (when (< (point) (point-max))
+          (delete-region (point) (point-max))
+          (insert "\n"))))))
 
 (defun orgx-format--reflow-paragraphs (beg end)
-  "Reflow prose paragraphs between BEG and END to `orgx-format-line-length'."
+  "Reflow prose paragraphs between BEG and END to `orgx-format-line-length'.
+Uses Org AST to locate paragraphs and leverages `org-fill-element' to respect
+Org-mode syntax (including hard line breaks, lists, and quote blocks)."
   (save-excursion
     (save-restriction
       (narrow-to-region beg end)
-      (goto-char (point-min))
       (let ((fill-column orgx-format-line-length))
-        (while (< (point) (point-max))
-          (cond
-           ((looking-at-p org-outline-regexp)
-            (forward-line 1))
-           ((orgx-format--in-protected-block-p)
-            (forward-line 1))
-           ((looking-at-p "^[ \t]*$")
-            (forward-line 1))
-           (t
-            (let ((para-beg (point)))
-              (forward-paragraph)
-              (let ((para-end (point)))
-                (fill-region-as-paragraph para-beg para-end)
-                (goto-char para-end))))))))))
+        (dolist (p (nreverse (org-element-map (org-element-parse-buffer)
+                                 'paragraph #'identity)))
+          (when-let* ((pos (or (org-element-contents-begin p)
+                               (org-element-begin p))))
+            (goto-char pos)
+            (org-fill-element)))))))
 
 (defun orgx-format--realign-tables (beg end)
-  "Realign all Org tables between BEG and END."
+  "Realign all Org tables between BEG and END using Org AST."
   (save-excursion
     (save-restriction
       (narrow-to-region beg end)
-      (goto-char (point-min))
-      (while (re-search-forward "^[ \t]*|" nil t)
-        (beginning-of-line)
-        (when (org-at-table-p)
-          (org-table-align)
-          (goto-char (org-table-end)))))))
+      (dolist (table (nreverse (org-element-map (org-element-parse-buffer)
+                                   'table #'identity)))
+        (when (eq (org-element-property :type table) 'org)
+          (goto-char (or (org-element-post-affiliated table)
+                         (org-element-begin table)))
+          (org-table-align))))))
 
 (defun orgx-format-section-at-point ()
   "Format the current Org section (or current subtree)."
@@ -187,8 +165,8 @@ Optionally trim blank lines at the start and end of the region according to
          (end (save-excursion
                 (goto-char beg)
                 (if (org-before-first-heading-p)
-                    (if (re-search-forward org-outline-regexp nil t)
-                        (match-beginning 0)
+                    (if (outline-next-heading)
+                        (point)
                       (point-max))
                   (org-end-of-subtree t t)
                   (point)))))
@@ -230,22 +208,23 @@ Yields incrementally between sections to keep Emacs responsive."
           (goto-char (point-min))
           ;; Format text before first heading
           (let ((first-heading (save-excursion
-                                 (if (re-search-forward org-outline-regexp nil t)
-                                     (match-beginning 0)
+                                 (if (outline-next-heading)
+                                     (point)
                                    (point-max)))))
             (when (> first-heading (point-min))
               (orgx-format-region (point-min) first-heading)
               (thread-yield)))
           ;; Format section by section
-          (while (re-search-forward org-outline-regexp nil t)
-            (beginning-of-line)
+          (goto-char (point-min))
+          (while (outline-next-heading)
             (let* ((sec-beg (point-marker))
                    (sec-end (save-excursion
                               (forward-line 1)
-                              (if (re-search-forward org-outline-regexp nil t)
-                                  (copy-marker (match-beginning 0))
+                              (if (outline-next-heading)
+                                  (point-marker)
                                 (point-max-marker)))))
-              (orgx-format-region (marker-position sec-beg) (marker-position sec-end))
+              (orgx-format-region (marker-position sec-beg)
+                                  (marker-position sec-end))
               (goto-char sec-end)
               (set-marker sec-beg nil)
               (set-marker sec-end nil)
@@ -254,14 +233,14 @@ Yields incrementally between sections to keep Emacs responsive."
 
 ;;; Linting functionality
 
-(defun orgx-format--line-too-long-p (line)
-  "Return non-nil if LINE exceeds `orgx-format-max-line-length'.
-Ignores table rows, comments, and lines that are exclusively URLs or links."
-  (and (> (length line) orgx-format-max-line-length)
-       (not (string-match-p "^[ \t]*|" line))
-       (not (string-match-p "^[ \t]*#" line))
-       (not (string-match-p "https?://[^ \t\n]+$" line))
-       (not (string-match-p "\\[\\[[^]]+\\]\\[?[^]]*\\]?\\]" line))))
+(defun orgx-format--line-exempt-from-length-p (line)
+  "Return non-nil if LINE is exempt from line length checks.
+Exempt lines are those containing standalone links or URLs."
+  (let ((trimmed (string-trim line)))
+    (or (string-prefix-p "http://" trimmed)
+        (string-prefix-p "https://" trimmed)
+        (and (string-prefix-p "[[" trimmed)
+             (string-suffix-p "]]" trimmed)))))
 
 (defun orgx-format-lint (&optional buffer)
   "Analyze BUFFER for formatting and line length errors without modifying it.
@@ -273,38 +252,43 @@ Returns a list of diagnostic plists:
       (save-excursion
         (save-restriction
           (widen)
-          (goto-char (point-min))
-          (let ((line-num 1)
-                (prev-heading nil))
-            (while (not (eobp))
-              (let ((line (buffer-substring-no-properties
-                           (line-beginning-position)
-                           (line-end-position))))
-                ;; Check line length
-                (when (orgx-format--line-too-long-p line)
-                  (push (list :line line-num
+          (let ((ast (org-element-parse-buffer)))
+            ;; Check blank lines immediately following headings
+            (dolist (hl (org-element-map ast 'headline #'identity))
+              (save-excursion
+                (goto-char (org-element-begin hl))
+                (org-end-of-meta-data nil)
+                (when (and (not (eobp))
+                           (progn (skip-chars-forward " \t") (eolp)))
+                  (push (list :line (line-number-at-pos)
                               :col 1
-                              :type 'line-length
-                              :message (format "Line length %d exceeds max %d"
-                                               (length line)
-                                               orgx-format-max-line-length))
-                        diagnostics))
-                ;; Check blank lines immediately following headings
-                (if (looking-at-p org-outline-regexp)
-                    (setq prev-heading line-num)
-                  (when (and prev-heading
-                             (= line-num (1+ prev-heading))
-                             (string-empty-p (string-trim line)))
-                    (push (list :line line-num
-                                :col 1
-                                :type 'blank-line
-                                :message "Blank line immediately follows heading")
-                          diagnostics))
-                  (unless (string-empty-p (string-trim line))
-                    (setq prev-heading nil))))
-              (forward-line 1)
-              (setq line-num (1+ line-num)))))))
-    (nreverse diagnostics)))
+                              :type 'blank-line
+                              :message "Blank line immediately follows heading")
+                        diagnostics))))
+            ;; Check line length in prose paragraphs
+            (dolist (p (org-element-map ast 'paragraph #'identity))
+              (save-excursion
+                (let ((end (or (org-element-contents-end p)
+                               (org-element-end p))))
+                  (goto-char (or (org-element-contents-begin p)
+                                 (org-element-begin p)))
+                  (while (< (point) end)
+                    (let ((line-len (- (line-end-position)
+                                       (line-beginning-position))))
+                      (when (> line-len orgx-format-max-line-length)
+                        (let ((line (buffer-substring-no-properties
+                                     (line-beginning-position)
+                                     (line-end-position))))
+                          (unless (orgx-format--line-exempt-from-length-p line)
+                            (push (list :line (line-number-at-pos)
+                                        :col 1
+                                        :type 'line-length
+                                        :message (format "Line length %d exceeds max %d"
+                                                         line-len
+                                                         orgx-format-max-line-length))
+                                  diagnostics)))))
+                    (forward-line 1)))))))))
+    (sort diagnostics (lambda (a b) (< (plist-get a :line) (plist-get b :line))))))
 
 ;;;###autoload
 (defun orgx-format-lint-buffer (&optional buffer)
