@@ -105,17 +105,14 @@ When SHORT is non-nil, format as date-only."
 (defun orgx-insert-date (&optional arg)
   "Insert an Org date stamp at point.
 Without prefix ARG, insert an active date stamp `<YYYY-MM-DD Day>'.
-With single prefix ARG (\\[universal-argument]), insert an inactive date
-stamp `[YYYY-MM-DD Day]'.
+With single prefix ARG (\\[universal-argument]), insert an active date-time
+stamp including the current time `<YYYY-MM-DD Day HH:MM>'.
 With double prefix ARG (\\[universal-argument] \\[universal-argument]),
-include the current time."
+insert an inactive date-time stamp `[YYYY-MM-DD Day HH:MM]'."
   (interactive "P")
-  (let* ((with-time (equal arg '(16)))
-         (inactive (or (equal arg '(4)) (equal arg 4))))
+  (let* ((with-time (not (null arg)))
+         (inactive (equal arg '(16))))
     (org-insert-time-stamp (current-time) with-time inactive)))
-
-;;;###autoload (defalias 'org-insert-date #'orgx-insert-date)
-(defalias 'org-insert-date #'orgx-insert-date)
 
 ;;; TOC priority preservation (for toc-org)
 

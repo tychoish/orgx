@@ -34,11 +34,14 @@ Other tests may leave `orgx-mode-turn-on' on the hook."
 (ert-deftest orgx-insert-date-test ()
   "Test inserting Org date stamps at point."
   (with-temp-buffer
-    (org-insert-date)
+    (orgx-insert-date)
     (should (string-match-p "^<[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\} [A-Za-z]+>$" (buffer-string))))
   (with-temp-buffer
     (orgx-insert-date '(4))
-    (should (string-match-p "^\\[[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\} [A-Za-z]+\\]$" (buffer-string))))
+    (should (string-match-p "^<[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\} [A-Za-z]+ [0-9]\\{2\\}:[0-9]\\{2\\}>$" (buffer-string))))
+  (with-temp-buffer
+    (orgx-insert-date '(16))
+    (should (string-match-p "^\\[[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\} [A-Za-z]+ [0-9]\\{2\\}:[0-9]\\{2\\}\\]$" (buffer-string))))
   (should (eq #'orgx-insert-date (keymap-lookup orgx-command-map "d"))))
 
 (ert-deftest orgx-done-state-match-test ()
