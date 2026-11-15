@@ -367,6 +367,14 @@ Other tests may leave `orgx-mode-turn-on' on the hook."
   (should (commandp (keymap-lookup orgx-link-map "i")))
   (should (commandp (keymap-lookup orgx-link-map "n"))))
 
+(ert-deftest orgx-archive-keymap-test ()
+  "Test that orgx-archive-map is mounted under C-c o C-f."
+  (should (keymapp orgx-archive-map))
+  (should (eq orgx-archive-map (keymap-lookup orgx-command-map "C-f")))
+  (should (commandp (keymap-lookup orgx-archive-map "a")))
+  (should (commandp (keymap-lookup orgx-archive-map "s")))
+  (should (commandp (keymap-lookup orgx-archive-map "d"))))
+
 (ert-deftest orgx-mode-keymaps-test ()
   "Test that orgx-mode-map and orgx-global-mode-map mount orgx-command-map on C-c o."
   (should (keymapp orgx-command-map))

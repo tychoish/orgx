@@ -659,7 +659,10 @@ buffer position."
   :name "orgx-archive"
   :doc "Archive commands under C-c o C-f (orgx-mode).")
 
+(keymap-set orgx-archive-map "a" (cons "done→sibling" #'orgx-archive-done-tasks-to-archive-sibling))
+(keymap-set orgx-archive-map "A" (cons "done→sibling" #'orgx-archive-done-tasks-to-archive-sibling))
 (keymap-set orgx-archive-map "e" #'org-cycle-force-archived)
+(keymap-set orgx-archive-map "f" (cons "done→file" #'orgx-archive-done-tasks-to-archive-file))
 (keymap-set orgx-archive-map "t" #'org-archive-set-tag)
 (keymap-set orgx-archive-map "s" (cons "current→sibling" #'org-archive-to-archive-sibling))
 (keymap-set orgx-archive-map "d" (cons "done+archive" #'orgx-mark-done-and-archive))
