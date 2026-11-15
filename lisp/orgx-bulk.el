@@ -32,11 +32,13 @@
 (require 'seq)
 (require 'subr-x)
 (require 'org)
+(require 'org-element)
 (require 'org-agenda)
 (require 'org-id)
 (require 'hitl-plan)
 (require 'hitl-plan-ui)
 
+(declare-function org-element--property "org-element-ast")
 (declare-function orgx-denote-plan-file-p "orgx-denote")
 (declare-function orgx-denote-files "orgx-denote")
 (declare-function orgx-bulk-batch-read-scope "orgx-bulk-agenda")
@@ -778,10 +780,16 @@ existing keyword line is rewritten; the current buffer must visit FILE."
                                       (not (member s org-done-keywords))))))
                        "in-progress"
                      "complete")))
-          (goto-char (point-min))
-          (when (and (re-search-forward "^#\\+execution_status:[ \t]*\\(.*?\\)[ \t]*$" nil t)
-                     (not (equal (match-string 1) new)))
-            (replace-match new t t nil 1)))))))
+          (when-let* ((kw (org-element-map (org-element-parse-buffer) 'keyword
+                            (lambda (k)
+                              (when (string-equal (upcase (org-element-property :key k)) "EXECUTION_STATUS")
+                                k))
+                            nil t)))
+            (let ((current (string-trim (or (org-element-property :value kw) ""))))
+              (unless (string-equal current new)
+                (goto-char (org-element-begin kw))
+                (delete-region (point) (line-end-position))
+                (insert (format "#+execution_status: %s" new))))))))))
 
 ;;; Interactive Entry Point (`C-c o b')
 

@@ -270,17 +270,22 @@ the first child; otherwise at the end, skipping trailing children tagged
   (save-excursion
     (let ((child-level (1+ level))
           (start (if parent
-                     (progn (goto-char parent) (line-end-position))
+                     (progn (goto-char parent) (forward-line 1) (point))
                    (point-min)))
           children)
       (goto-char start)
       (if prepend
-          (if (re-search-forward "^\\*+ " end t) (match-beginning 0) end)
-        (while (re-search-forward "^\\(\\*+\\) " end t)
-          (when (= (length (match-string 1)) child-level)
-            (push (cons (match-beginning 0)
-                        (and (member org-archive-tag (org-get-tags nil t)) t))
-                  children)))
+          (let ((continue (if (org-at-heading-p) t (outline-next-heading))))
+            (if (and continue (< (point) end))
+                (point)
+              end))
+        (let ((continue (if (org-at-heading-p) t (outline-next-heading))))
+          (while (and continue (< (point) end))
+            (when (= (org-current-level) child-level)
+              (push (cons (point)
+                          (and (member org-archive-tag (org-get-tags nil t)) t))
+                    children))
+            (setq continue (outline-next-heading))))
         (let ((pos end))
           (while (and children (cdar children))
             (setq pos (caar children))
@@ -301,15 +306,16 @@ Must be called with the buffer widened."
     (dolist (seg (orgx-capture-shell--headline-path headline))
       (let ((found nil))
         (goto-char beg)
-        (while (and (not found)
-                    (re-search-forward "^\\(\\*+\\) " end t))
-          (when (and (> (length (match-string 1)) level)
-                     (string-equal (org-get-heading t t t t) seg))
-            (setq found (match-beginning 0))))
+        (let ((continue (if (org-at-heading-p) t (outline-next-heading))))
+          (while (and (not found) continue (< (point) end))
+            (when (and (> (org-current-level) level)
+                       (string-equal (org-get-heading t t t t) seg))
+              (setq found (point)))
+            (setq continue (outline-next-heading))))
         (if found
             (progn
               (goto-char found)
-              (setq level (length (progn (looking-at "\\*+") (match-string 0))))
+              (setq level (org-current-level))
               (setq beg found)
               (org-end-of-subtree t t)
               (setq end (point)))
@@ -354,18 +360,11 @@ re-leveled to be children of the target.  Returns a record
 
 (defun orgx-capture-shell--buffer-headline-paths ()
   "Return outline paths of all headings in the current buffer."
-  (let (stack paths)
-    (org-with-wide-buffer
-     (goto-char (point-min))
-     (while (re-search-forward "^\\(\\*+\\) " nil t)
-       (let ((lvl (length (match-string 1)))
-             (title (org-get-heading t t t t)))
-         (while (and stack (>= (caar stack) lvl)) (pop stack))
-         (push (cons lvl title) stack)
-         (push (mapconcat #'cdr (reverse stack)
-                          orgx-capture-shell-headline-separator)
-               paths))))
-    (nreverse paths)))
+  (org-with-wide-buffer
+   (org-map-entries
+    (lambda ()
+      (mapconcat #'identity (org-get-outline-path t)
+                 orgx-capture-shell-headline-separator)))))
 
 (defun orgx-capture-shell--headline-paths (file)
   "Return outline paths of the headings in FILE, or nil if it doesn't exist."

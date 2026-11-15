@@ -29,6 +29,7 @@
 (require 'seq)
 (require 'outline)
 (require 'org)
+(require 'org-element)
 (require 'org-fold)
 (require 'org-capture)
 (require 'annotated-completing-read)
@@ -41,6 +42,8 @@
 (require 'ol)
 
 (declare-function org-cycle-force-archived "org-cycle")
+(declare-function org-in-regexp "org")
+(declare-function org-element--property "org-element-ast")
 (declare-function org-table--shrink-columns "org-table")
 (declare-function org-table-shrink "org-table")
 (declare-function org-table-expand "org-table")
@@ -1211,13 +1214,8 @@ PROPERTY is compared as a string against the entry's own (non-inherited)
 value, so CUSTOM_ID and any other property work alike.  The search covers
 the whole accessible buffer (widened); point is not moved."
   (org-with-wide-buffer
-   (goto-char (point-min))
-   (let (found)
-     (while (and (not found)
-                 (re-search-forward org-heading-regexp nil t))
-       (when (equal (org-entry-get (point) property) value)
-         (setq found (copy-marker (line-beginning-position)))))
-     found)))
+   (when-let* ((pos (org-find-property property value)))
+     (copy-marker pos))))
 
 (defmacro orgx--with-entry (pos &rest body)
   "Run BODY with point on the heading of the entry at POS (default point).
@@ -1313,7 +1311,7 @@ of that title instead, which is created when missing."
       (goto-char end)
       (when (and (eobp) (not (bolp))) (insert "\n"))
       ;; Sit after existing body text but before trailing blank lines.
-      (re-search-backward "[^ \t\n]" head t)
+      (skip-chars-backward " \t\n" head)
       (end-of-line)
       (if (eobp) (insert "\n") (forward-char 1))
       (insert text))))
@@ -1360,14 +1358,12 @@ The plist contains:
            (body-end (save-excursion
                        (end-of-line)
                        (if (outline-next-heading) (point) (point-max))))
-           (range (org-get-property-block))
-           (props (when range
-                    (save-excursion
-                      (goto-char (car range))
-                      (let (res)
-                        (while (re-search-forward "^[ \t]*:\\([A-Za-z0-9_@-]+\\):[ \t]*\\(.*\\)$" (cdr range) t)
-                          (push (cons (match-string 1) (string-trim (match-string 2))) res))
-                        (nreverse res)))))
+           (props (save-restriction
+                    (narrow-to-region (point) body-end)
+                    (org-element-map (org-element-parse-buffer) 'node-property
+                      (lambda (np)
+                        (cons (org-element-property :key np)
+                              (org-element-property :value np))))))
            (body (save-excursion
                    (org-end-of-meta-data t)
                    (let ((b-start (min (point) body-end)))

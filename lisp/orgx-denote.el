@@ -20,8 +20,10 @@
 (require 'subr-x)
 (require 'outline)
 (require 'org)
+(require 'org-element)
 (require 'org-agenda)
 
+(declare-function org-element--property "org-element-ast")
 (declare-function denote-directories "denote")
 (declare-function denote-retrieve-filename-keywords-as-list "denote")
 (declare-function denote-retrieve-filename-signature "denote")
@@ -64,6 +66,20 @@ Computed fresh on each call so newly added notes are picked up."
       (denote-directories)
       (seq-mapcat (lambda (dir) (directory-files-recursively dir "\\.org\\'"))))))
 
+(defun orgx-denote--buffer-completed-p ()
+  "Return non-nil if current buffer's frontmatter indicates a completed note."
+  (let* ((kws (org-collect-keywords '("EXECUTION_STATUS" "STATUS" "FILETAGS")))
+         (status (or (car (alist-get "EXECUTION_STATUS" kws nil nil #'string-equal))
+                     (car (alist-get "STATUS" kws nil nil #'string-equal))))
+         (filetags (alist-get "FILETAGS" kws nil nil #'string-equal)))
+    (or (and status (member (downcase (string-trim status))
+                            '("complete" "executed" "closed")))
+        (and filetags
+             (seq-some (lambda (raw)
+                         (let ((tags (split-string raw "[: \t]+" t)))
+                           (or (member "x" tags) (member "done" tags))))
+                       filetags)))))
+
 (defun orgx-denote-file-completed-p (file)
   "Return non-nil if FILE represents a closed or completed denote note.
 Checks filename keywords for \"x\" or \"done\", and note frontmatter for
@@ -75,18 +91,22 @@ execution_status/status of complete/executed/closed or tags :x:/:done:."
                    (split-string (match-string 1 (file-name-nondirectory file)) "_")))))
       (or (member "x" kws)
           (member "done" kws)
-          (let ((buf (get-file-buffer file)))
-            (if buf
-                (with-current-buffer buf
-                  (save-excursion
-                    (goto-char (point-min))
-                    (or (re-search-forward "^#\\+\\(?:execution_status\\|status\\):[ \t]*\\(?:complete\\|executed\\|closed\\)" 1024 t)
-                        (re-search-forward "^#\\+filetags:.*:\\(?:x\\|done\\):" 1024 t))))
-              (with-temp-buffer
-                (insert-file-contents file nil 0 1024)
-                (goto-char (point-min))
-                (or (re-search-forward "^#\\+\\(?:execution_status\\|status\\):[ \t]*\\(?:complete\\|executed\\|closed\\)" nil t)
-                    (re-search-forward "^#\\+filetags:.*:\\(?:x\\|done\\):" nil t)))))))))
+          (if-let* ((buf (get-file-buffer file)))
+              (with-current-buffer buf
+                (orgx-denote--buffer-completed-p))
+            (with-temp-buffer
+              (insert-file-contents file nil 0 1024)
+              (org-mode)
+              (orgx-denote--buffer-completed-p)))))))
+
+(defun orgx-denote--buffer-plan-p ()
+  "Return non-nil if current buffer is tagged as a plan or tracker."
+  (when-let* ((filetags (alist-get "FILETAGS" (org-collect-keywords '("FILETAGS"))
+                                   nil nil #'string-equal)))
+    (seq-some (lambda (raw)
+                (let ((tags (split-string raw "[: \t]+" t)))
+                  (or (member "plan" tags) (member "tracker" tags))))
+              filetags)))
 
 (defun orgx-denote-plan-file-p (file)
   "Return non-nil if FILE represents a plan or tracker note."
@@ -100,16 +120,13 @@ execution_status/status of complete/executed/closed or tags :x:/:done:."
           (member "tracker" kws)
           (string-match-p "_plan" base)
           (string-match-p "_tracker" base)
-          (let ((buf (get-file-buffer file)))
-            (if buf
-                (with-current-buffer buf
-                  (save-excursion
-                    (goto-char (point-min))
-                    (re-search-forward "^#\\+filetags:.*:\\(?:plan\\|tracker\\):" 1024 t)))
-              (with-temp-buffer
-                (insert-file-contents file nil 0 1024)
-                (goto-char (point-min))
-                (re-search-forward "^#\\+filetags:.*:\\(?:plan\\|tracker\\):" nil t))))))))
+          (if-let* ((buf (get-file-buffer file)))
+              (with-current-buffer buf
+                (orgx-denote--buffer-plan-p))
+            (with-temp-buffer
+              (insert-file-contents file nil 0 1024)
+              (org-mode)
+              (orgx-denote--buffer-plan-p)))))))
 
 (defun orgx-denote-active-files ()
   "Return all denote files that are not closed, completed, or tagged x."
@@ -353,18 +370,24 @@ contains a `denote:ID' link to it."
   "Return the `#+title:' of FILE, falling back to its base name."
   (with-temp-buffer
     (insert-file-contents file nil 0 2048)
-    (goto-char (point-min))
-    (if (re-search-forward "^#\\+title:[ \t]*\\(.+?\\)[ \t]*$" nil t)
-        (match-string 1)
-      (file-name-base file))))
+    (org-mode)
+    (or (car (alist-get "TITLE" (org-collect-keywords '("TITLE"))
+                        nil nil #'string-equal))
+        (file-name-base file))))
 
 (defun orgx-denote--has-open-items-p (file keywords)
   "Return non-nil if FILE has a heading whose TODO keyword is in KEYWORDS."
-  (let ((case-fold-search nil)
-        (re (format "^\\*+ %s[ \t]" (regexp-opt keywords t))))
-    (with-temp-buffer
-      (insert-file-contents file)
-      (and (re-search-forward re nil t) t))))
+  (with-temp-buffer
+    (insert-file-contents file)
+    (let ((org-todo-keywords (list (cons 'sequence (append keywords '("|" "DONE"))))))
+      (org-mode)
+      (catch 'found
+        (org-map-entries
+         (lambda ()
+           (when-let* ((state (org-get-todo-state)))
+             (when (member state keywords)
+               (throw 'found t)))))
+        nil))))
 
 (defun orgx-denote--open-note-files (files tags keywords)
   "Return the denote notes in FILES that fit TAGS and KEYWORDS.
@@ -387,14 +410,25 @@ they are the top-level headings of the buffer."
       (let* ((heading-p (org-at-heading-p))
              (level (if heading-p (1+ (org-outline-level)) 1))
              (end (if heading-p (save-excursion (org-end-of-subtree t t)) (point-max)))
-             (re (format "^\\*\\{%d\\} .*\\[\\[denote:\\([0-9]\\{8\\}T[0-9]\\{6\\}\\)" level))
-             (ids nil))
-        (if heading-p
-            (forward-line 1)
-          (goto-char (point-min)))
-        (while (re-search-forward re end t)
-          (push (match-string 1) ids))
-        ids))))
+             (ids nil)
+             (continue (if heading-p
+                           (progn (forward-line 1)
+                                  (if (org-at-heading-p) t (outline-next-heading)))
+                         (goto-char (point-min))
+                         (if (org-at-heading-p) t (outline-next-heading)))))
+        (while (and continue (< (point) end))
+          (when (= (org-current-level) level)
+            (let* ((title (org-get-heading t t t t))
+                   (links (org-element-map
+                              (org-element-parse-secondary-string title '(link))
+                              'link #'identity)))
+              (dolist (l links)
+                (let ((raw (or (org-element-property :path l)
+                               (org-element-property :raw-link l))))
+                  (when (string-match "\\(?:denote:\\)?\\([0-9]\\{8\\}T[0-9]\\{6\\}\\)" raw)
+                    (push (match-string 1 raw) ids))))))
+          (setq continue (outline-next-heading)))
+        (nreverse ids)))))
 
 (defun orgx-denote--target-marker (target)
   "Return a marker at the heading of refile TARGET, or at the start of its file."
