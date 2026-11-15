@@ -60,6 +60,13 @@
   :type 'string
   :group 'orgx-capture)
 
+(defcustom orgx-capture-default-agent-tasks-headline "Tasks"
+  "Headline under which agent tasks are captured.
+When nil or empty, captures target the file directly without a parent headline."
+  :type '(choice (string :tag "Parent headline")
+                 (const :tag "File only (no parent headline)" nil))
+  :group 'orgx-capture)
+
 ;;; External package integrations
 
 (defun orgx-capture-setup-asq-template ()
@@ -291,11 +298,17 @@ ends with TIME-PROMPT-SUFFIX, the template is marked :time-prompt t."
    :time-prompt-suffix "jp"))
 
 ;;;###autoload
-(cl-defun orgx-capture-add-task-templates (&key name path (key ""))
-  "Register a full set of task capture templates for NAME at PATH."
-  (orgx-capture--add-flat-templates
-   :kind "tasks" :char "t" :name name :path path :key key
-   :target (list 'file+headline path "Tasks")
+(cl-defun orgx-capture-add-task-templates (&key name path (key "") (headline "Tasks"))
+  "Register a full set of task capture templates for NAME at PATH.
+When KEY is provided, prefix capture template keys with KEY.
+When HEADLINE is nil or empty, templates target PATH directly as a file.
+Otherwise, templates target the headline named HEADLINE in PATH."
+  (let ((target (if (and headline (not (string-empty-p headline)))
+                    (list 'file+headline path headline)
+                  (list 'file path))))
+    (orgx-capture--add-flat-templates
+     :kind "tasks" :char "t" :name name :path path :key key
+     :target target
    :body-fn (lambda (anchor &optional heading-p)
               (cond
                (heading-p
@@ -311,7 +324,7 @@ ends with TIME-PROMPT-SUFFIX, the template is marked :time-prompt t."
                    ("tlb" "%(orgx-capture--get-link)" "org-link (body)")
                    ("tlh" "%(orgx-capture--get-link)" "org-link (heading)" :heading-anchor t)
                    ("tlq" "%(orgx-capture--prompt-link)" "quick org-link task" :heading-anchor t :immediate-finish t)
-                   ("tk" "%c" "emacs kill-ring"))))
+                   ("tk" "%c" "emacs kill-ring")))))
 
 ;;;###autoload
 (cl-defun orgx-capture-add-note-templates (&key name path (key ""))
@@ -421,7 +434,8 @@ into `org-load-hook'."
   (orgx-capture-add-task-templates
    :name "agentic"
    :path orgx-capture-default-agent-file
-   :key "a")
+   :key "a"
+   :headline orgx-capture-default-agent-tasks-headline)
   (orgx-capture-add-journal-templates
    :name "agentic"
    :path orgx-capture-default-agent-file

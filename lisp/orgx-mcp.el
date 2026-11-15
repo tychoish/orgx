@@ -111,7 +111,9 @@ just before the entry is finalized."
          (h-token (concat "ORGXHEADING" token))
          (b-token (concat "ORGXBODY" token))
          (has-body (and body-str (not (string-empty-p body-str))))
-         (content (concat "** " h-token "\n"
+         ;; Use a single star: Org-capture automatically adjusts the heading
+         ;; level based on the target (level 1 for file, level 2 for file+headline).
+         (content (concat "* " h-token "\n"
                           ":PROPERTIES:\n:CREATED:  " timestamp "\n:END:\n"
                           (if has-body (concat b-token "\n") "")))
          (fill (lambda ()

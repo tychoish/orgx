@@ -36,12 +36,24 @@
     (should (assoc "nn" org-capture-templates))
     (should (assoc "jj" org-capture-templates))
     (should (assoc "tt" org-capture-templates))
+    (should (equal (nth 3 (assoc "att" org-capture-templates))
+                   '(file+headline "/tmp/org/agentic.org" "Tasks")))
     ;; Group header placeholders must exist so org-capture can nest the
     ;; multi-character keys under their prefix in the selection menu.
     (should (equal (assoc "t" org-capture-templates) '("t" "tasks")))
     (should (equal (assoc "j" org-capture-templates) '("j" "journal")))
     (should (equal (assoc "n" org-capture-templates) '("n" "notes")))
     (should (equal (assoc "a" org-capture-templates) '("a" "agent")))))
+
+(ert-deftest orgx-capture-agent-file-only-test ()
+  "Test agent task capture targeting file only when headline is nil."
+  (let ((org-capture-templates nil)
+        (org-directory "/tmp/org")
+        (orgx-capture-default-agent-file "/tmp/org/agentic.org")
+        (orgx-capture-default-agent-tasks-headline nil))
+    (orgx-capture-setup-standard-templates)
+    (should (equal (nth 3 (assoc "att" org-capture-templates))
+                   '(file "/tmp/org/agentic.org")))))
 
 (ert-deftest orgx-capture-add-project-file-templates-test ()
   "Test project file template registration macro and helper."
