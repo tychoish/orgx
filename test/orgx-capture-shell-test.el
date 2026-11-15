@@ -868,5 +868,17 @@
     (search-forward "target")
     (should-not (orgx-capture-shell--flyspell-verify))))
 
+(ert-deftest orgx-capture-shell-capture-echo-truncated-test ()
+  "Post-capture message truncates multi-line content to first line."
+  (orgx-capture-shell-test--with-file "* Tasks\n"
+    (let ((msg (orgx-capture-shell--capture
+                "First line of multi-line task"
+                :body "Second line of body\nThird line of body"
+                :template 'task
+                :file file
+                :headline "Tasks")))
+      (should (string-match-p "Captured -> \\[.*:Tasks\\] \\* TODO First line of multi-line task\\.\\.\\." msg))
+      (should-not (string-match-p "Second line" msg)))))
+
 (provide 'orgx-capture-shell-test)
 ;;; orgx-capture-shell-test.el ends here

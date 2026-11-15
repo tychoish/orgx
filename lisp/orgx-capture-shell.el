@@ -400,12 +400,20 @@ description string."
      file headline entry (orgx-capture-shell--resolve-prepend template file))
     (when orgx-capture-shell--status
       (setq orgx-capture-shell--status 'success))
-    (format "Captured -> [%s%s] %s"
-            (file-name-nondirectory file)
-            (if (and headline (not (string-empty-p headline)))
-                (format ":%s" headline)
-              "")
-            entry)))
+    (let* ((trimmed (string-trim entry))
+           (first-line (car (split-string trimmed "\n" t)))
+           (preview (cond
+                     ((> (length first-line) 60)
+                      (concat (substring first-line 0 57) "..."))
+                     ((string-match-p "\n" trimmed)
+                      (concat first-line "..."))
+                     (t first-line))))
+      (format "Captured -> [%s%s] %s"
+              (file-name-nondirectory file)
+              (if (and headline (not (string-empty-p headline)))
+                  (format ":%s" headline)
+                "")
+              preview))))
 
 (defun orgx-capture-shell--undo-last ()
   "Undo the most recently captured entry from `orgx-capture-shell-undo-ring'."
