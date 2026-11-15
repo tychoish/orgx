@@ -847,5 +847,13 @@
   (should (string-match-p "\nbody\\'"
                           (orgx-capture-shell--format-entry "title\nbody" 'journal))))
 
+(ert-deftest orgx-capture-shell-recent-multiline-summary-test ()
+  "Multi-line captures show only their first line in /recent."
+  (orgx-capture-shell-test--with-file "* Tasks\n"
+    (orgx-capture-shell--insert-entry file "Tasks" "* TODO First Line\nSecond Line\nThird Line" t)
+    (let ((output (orgx-capture-shell--execute-slash-command "/recent")))
+      (should (string-match-p "\\* TODO First Line\\.\\.\\." output))
+      (should-not (string-match-p "Second Line" output)))))
+
 (provide 'orgx-capture-shell-test)
 ;;; orgx-capture-shell-test.el ends here

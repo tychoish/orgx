@@ -642,17 +642,23 @@ Returns a message string."
       (org-fold-show-context))))
 
 (defun orgx-capture-shell--recent-list ()
-  "Return the recent captures as clickable buttons."
+  "Return the recent captures as clickable buttons.
+Multi-line entries display only their first line with an ellipsis."
   (with-temp-buffer
     (seq-do
      (lambda (record)
-       (insert "- ")
-       (insert-text-button
-        (format "[%s] %s" (file-name-nondirectory (nth 0 record))
-                (string-trim (nth 2 record)))
-        'action #'orgx-capture-shell--visit-recent
-        'follow-link t 'orgx-capture-record record)
-       (insert "\n"))
+       (let* ((raw-text (string-trim (nth 2 record)))
+              (first-line (car (split-string raw-text "\n" t)))
+              (display-text (if (string-match-p "\n" raw-text)
+                                (format "%s..." first-line)
+                              first-line)))
+         (insert "- ")
+         (insert-text-button
+          (format "[%s] %s" (file-name-nondirectory (nth 0 record))
+                  display-text)
+          'action #'orgx-capture-shell--visit-recent
+          'follow-link t 'orgx-capture-record record)
+         (insert "\n")))
      orgx-capture-shell-undo-ring)
     (string-trim-right (buffer-string))))
 
