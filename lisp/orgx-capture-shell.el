@@ -908,6 +908,7 @@ Ignores prompts, slash commands, and short syntax."
   (setq comint-use-prompt-regexp t)
   (setq comint-input-sender #'orgx-capture-shell-input-sender)
   (setq-local fill-column 80)
+  (visual-line-mode 1)
   (add-hook 'completion-at-point-functions #'orgx-capture-shell-completion-at-point nil t)
 
   ;; Autocomplete and spellcheck

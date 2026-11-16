@@ -390,6 +390,13 @@
     (should (memq #'orgx-capture-shell-completion-at-point
                   completion-at-point-functions))))
 
+;;; Visual line mode
+
+(ert-deftest orgx-capture-shell-visual-line-mode-test ()
+  (with-temp-buffer
+    (orgx-capture-shell-mode)
+    (should visual-line-mode)))
+
 ;;; Capture form
 
 (ert-deftest orgx-capture-shell-form-trigger-detection-test ()
