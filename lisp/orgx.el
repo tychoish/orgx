@@ -657,10 +657,9 @@ buffer position."
 
 (defvar-keymap orgx-archive-map
   :name "orgx-archive"
-  :doc "Archive commands under C-c o C-f (orgx-mode).")
+  :doc "Archive commands under C-c o f (orgx-mode).")
 
 (keymap-set orgx-archive-map "a" (cons "done→sibling" #'orgx-archive-done-tasks-to-archive-sibling))
-(keymap-set orgx-archive-map "A" (cons "done→sibling" #'orgx-archive-done-tasks-to-archive-sibling))
 (keymap-set orgx-archive-map "e" #'org-cycle-force-archived)
 (keymap-set orgx-archive-map "f" (cons "done→file" #'orgx-archive-done-tasks-to-archive-file))
 (keymap-set orgx-archive-map "t" #'org-archive-set-tag)
@@ -685,8 +684,7 @@ buffer position."
 (keymap-set orgx-command-map "B" #'orgx-bulk-resume)
 (keymap-set orgx-command-map "c" orgx-capture-map)
 (keymap-set orgx-command-map "d" #'orgx-insert-date)
-(keymap-set orgx-command-map "f" #'orgx-agenda-files-open)
-(keymap-set orgx-command-map "C-f" orgx-archive-map)
+(keymap-set orgx-command-map "f" orgx-archive-map)
 (keymap-set orgx-command-map "g" orgx-gist-map)
 (keymap-set orgx-command-map "h" #'consult-org-heading)
 (keymap-set orgx-command-map "j" #'orgx-capture)

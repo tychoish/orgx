@@ -371,9 +371,9 @@ Other tests may leave `orgx-mode-turn-on' on the hook."
   (should (commandp (keymap-lookup orgx-link-map "n"))))
 
 (ert-deftest orgx-archive-keymap-test ()
-  "Test that orgx-archive-map is mounted under C-c o C-f."
+  "Test that orgx-archive-map is mounted under C-c o f."
   (should (keymapp orgx-archive-map))
-  (should (eq orgx-archive-map (keymap-lookup orgx-command-map "C-f")))
+  (should (eq orgx-archive-map (keymap-lookup orgx-command-map "f")))
   (should (commandp (keymap-lookup orgx-archive-map "a")))
   (should (commandp (keymap-lookup orgx-archive-map "s")))
   (should (commandp (keymap-lookup orgx-archive-map "d"))))
@@ -393,7 +393,7 @@ Other tests may leave `orgx-mode-turn-on' on the hook."
   (should (eq #'org-save-all-org-buffers (keymap-lookup orgx-command-map "s")))
   (should (eq #'orgx-agenda-view (keymap-lookup orgx-command-map "a")))
   (should (eq #'orgx-agenda-files-reload (keymap-lookup orgx-command-map "r")))
-  (should (eq #'orgx-agenda-files-open (keymap-lookup orgx-command-map "f")))
+  (should (eq orgx-archive-map (keymap-lookup orgx-command-map "f")))
   (should (eq #'orgx-agenda-files-open (keymap-lookup orgx-command-map "o")))
   (should (eq #'orgx-capture (keymap-lookup orgx-command-map "j")))
   (should (eq #'orgx-agenda-for-file (keymap-lookup orgx-command-map "/")))
