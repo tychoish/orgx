@@ -9,7 +9,6 @@
 ;; - File discovery and filtering for active, completed, and plan notes
 ;; - Sequence-number (signature) sorting and category formatting in org-agenda
 ;; - Dedicated Denote agenda views (todos, questions, composite, completed plans)
-;; - Subtree extraction to new Denote notes (`orgx-denote-migrate-subtree')
 ;; - Standard Denote capture templates
 ;; - Capture of a linked heading per note with open TODOs
 ;;   (`orgx-denote-capture-open-items')
@@ -272,12 +271,6 @@ signature, and formats the sequence category."
             (cons cmd (seq-remove (lambda (c) (equal (car c) (car cmd)))
                                   org-agenda-custom-commands))))))
 
-
-;;; Subtree migration
-
-;; Moved to `denote-convert-subtree' in the denote-convert package.
-(define-obsolete-function-alias 'orgx-denote-migrate-subtree
-  #'denote-convert-subtree "2026-11-16")
 
 ;;; Capture template integration
 
