@@ -11,7 +11,7 @@ Org mode extensions, structured capture templates, continuous REPL capture shell
   - =orgx.el=: Core Org conveniences, unified global (=C-c o=) and minor-mode (=C-c o c=) keymaps, and structured navigation.
   - =orgx-capture.el=: Structured capture template generator DSL with customizable default files.
   - =orgx-capture-shell.el=: Non-modal comint REPL capture shell displayed in a dedicated 15-line bottom popup window.
-  - =orgx-denote.el=: Optional Denote integrations (agenda views, signature sorting, subtree extraction).
+  - =orgx-denote.el=: Optional Denote integrations (agenda views, signature sorting). Subtree extraction moved to =denote-convert-subtree=.
 - *Rust CLI (=crates/orgx-cli/)*:
   - High-performance command-line client built on =sprite-direct= and =reedline= for one-shot piping and interactive terminal capture outside Emacs.
 

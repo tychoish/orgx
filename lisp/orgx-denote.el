@@ -275,48 +275,9 @@ signature, and formats the sequence category."
 
 ;;; Subtree migration
 
-(defun orgx-denote--parse-heading-date (heading)
-  "Return an Emacs time value for the first org timestamp in HEADING, or nil."
-  (when (string-match org-ts-regexp-both heading)
-    (condition-case nil
-        (org-time-string-to-time (match-string 0 heading))
-      (error nil))))
-
-;;;###autoload
-(defun orgx-denote-migrate-subtree ()
-  "Extract the current Org subtree to a new denote note.
-Replaces the original heading with a denote link to the newly created note.
-Preserves timestamps in CREATED property if present."
-  (interactive)
-  (when (derived-mode-p 'org-agenda-mode)
-    (org-agenda-goto))
-  (unless (derived-mode-p 'org-mode)
-    (user-error "Must be in an org-mode or org-agenda-mode buffer"))
-  (let* ((source-buf (current-buffer))
-         (insert-marker (copy-marker (org-entry-beginning-position)))
-         (level (org-current-level))
-         (heading (org-get-heading t t t t))
-         (heading-date (orgx-denote--parse-heading-date heading)))
-    (when (and heading-date
-               (not (or (org-entry-get nil "DATE")
-                        (org-entry-get nil "CREATED")
-                        (org-entry-get nil "CLOSED"))))
-      (org-set-property "CREATED"
-                        (format-time-string "[%Y-%m-%d %a %H:%M]" heading-date)))
-    (when-let* ((path (and (fboundp 'denote-org-extract-org-subtree)
-                           (denote-org-extract-org-subtree))))
-      (with-current-buffer source-buf
-        (save-excursion
-          (goto-char insert-marker)
-          (insert (concat (make-string level ?*)
-                          " "
-                          (if (fboundp 'denote-format-link)
-                              (denote-format-link path heading 'org nil)
-                            (format "[[file:%s][%s]]" path heading))
-                          "\n"))
-          (goto-char insert-marker)
-          (org-toggle-tag "denoted" 'on)))
-      (set-marker insert-marker nil))))
+;; Moved to `denote-convert-subtree' in the denote-convert package.
+(define-obsolete-function-alias 'orgx-denote-migrate-subtree
+  #'denote-convert-subtree "2026-11-16")
 
 ;;; Capture template integration
 

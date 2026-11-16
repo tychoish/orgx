@@ -69,41 +69,6 @@
       (should (assoc "dj" org-capture-templates))
       (should (assoc "dJ" org-capture-templates)))))
 
-(ert-deftest orgx-denote-parse-heading-date-inactive-test ()
-  "Parses an inactive timestamp in a heading string."
-  (let ((result (orgx-denote--parse-heading-date "[2024-03-15 Fri] My note")))
-    (should result)
-    (let ((decoded (decode-time result)))
-      (should (= 2024 (nth 5 decoded)))
-      (should (= 3 (nth 4 decoded)))
-      (should (= 15 (nth 3 decoded))))))
-
-(ert-deftest orgx-denote-parse-heading-date-active-test ()
-  "Parses an active timestamp in a heading string."
-  (let ((result (orgx-denote--parse-heading-date "<2023-11-01 Wed 09:30> Meeting notes")))
-    (should result)
-    (let ((decoded (decode-time result)))
-      (should (= 2023 (nth 5 decoded)))
-      (should (= 11 (nth 4 decoded)))
-      (should (= 1 (nth 3 decoded))))))
-
-(ert-deftest orgx-denote-parse-heading-date-no-timestamp-test ()
-  "Returns nil when the heading contains no timestamp."
-  (should-not (orgx-denote--parse-heading-date "Plain heading with no date")))
-
-(ert-deftest orgx-denote-parse-heading-date-empty-test ()
-  "Returns nil for an empty heading string."
-  (should-not (orgx-denote--parse-heading-date "")))
-
-(ert-deftest orgx-denote-parse-heading-date-date-only-test ()
-  "Parses a date-only inactive timestamp."
-  (let ((result (orgx-denote--parse-heading-date "[2025-06-30 Mon]")))
-    (should result)
-    (let ((decoded (decode-time result)))
-      (should (= 2025 (nth 5 decoded)))
-      (should (= 6 (nth 4 decoded)))
-      (should (= 30 (nth 3 decoded))))))
-
 (ert-deftest orgx-denote-skip-unless-open-question-test ()
   "orgx-skip-unless-open-question skips answered, done, metadata, and
 inherited subheadings; it does not itself filter non-question headings
