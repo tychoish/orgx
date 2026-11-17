@@ -144,11 +144,17 @@ setting and only has to be local."
 
 ;;; 1. `todo-state' (`t')
 
+(defconst orgx-bulk-done-pseudo-state "@done"
+  "Pseudo `todo-state' argument meaning each heading's own sequence's done state.
+So TODO becomes DONE and QUESTION becomes ANSWERED in a single plan.")
+
 (defun orgx-bulk-ops--validate-todo-state (state)
   "Return a problem string if STATE is not a valid TODO keyword, or nil."
   (cond
    ((or (null state) (string-empty-p state))
     "empty target state")
+   ((equal state orgx-bulk-done-pseudo-state)
+    nil)
    ((and org-todo-keywords-1 (not (member state org-todo-keywords-1)))
     (format "unknown state %s" state))))
 
@@ -178,11 +184,16 @@ setting and only has to be local."
     ;; A blocked `org-todo' quietly leaves the buffer untouched.  An unchanged
     ;; state alone is not failure: repeating tasks revert to TODO but edit the
     ;; heading.
-    (let ((tick (buffer-chars-modified-tick)))
-      (org-todo state)
-      (unless (or (equal (org-get-todo-state) state)
+    (let ((tick (buffer-chars-modified-tick))
+          (done-p (equal state orgx-bulk-done-pseudo-state)))
+      (org-todo (if done-p 'done state))
+      (unless (or (if done-p
+                      (member (org-get-todo-state) org-done-keywords)
+                    (equal (org-get-todo-state) state))
                   (/= tick (buffer-chars-modified-tick)))
-        (error "TODO state change to %s blocked" state)))
+        (error "TODO state change to %s blocked" state))
+      (when done-p
+        (setq state (org-get-todo-state))))
     (when (and (memq log-mode '(one each))
                note-text
                (not (string-empty-p note-text)))

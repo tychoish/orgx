@@ -232,6 +232,25 @@
         (insert-file-contents f)
         (should-not (string-match-p "<2026-01-01" (buffer-string)))))))
 
+(ert-deftest orgx-bulk-ops-todo-state-done-pseudo-test ()
+  ;; "@done" closes each heading in its own sequence: TODO->DONE, QUESTION->ANSWERED.
+  (orgx-bulk-ops-test--with-env f "#+TODO: TODO | DONE\n#+TODO: QUESTION | ANSWERED\n* TODO A\n* QUESTION B\n"
+    (with-current-buffer (find-file-noselect f)
+      (org-mode)
+      (org-set-regexps-and-options))
+    (orgx-bulk-ops-test--run f (list (list 'todo-state orgx-bulk-done-pseudo-state)))
+    (with-current-buffer (find-file-noselect f)
+      (should (equal (org-map-entries #'org-get-todo-state) '("DONE" "ANSWERED"))))))
+
+(ert-deftest orgx-bulk-ops-todo-state-cancel-question-test ()
+  (orgx-bulk-ops-test--with-env f "#+TODO: TODO | DONE\n#+TODO: QUESTION | ANSWERED\n#+TODO: BLOCKED | CANCELED\n* TODO A\n* QUESTION B\n"
+    (with-current-buffer (find-file-noselect f)
+      (org-mode)
+      (org-set-regexps-and-options))
+    (orgx-bulk-ops-test--run f '((todo-state "CANCELED")))
+    (with-current-buffer (find-file-noselect f)
+      (should (equal (org-map-entries #'org-get-todo-state) '("CANCELED" "CANCELED"))))))
+
 ;;; Notes Policy (`ignore', `one', `each')
 
 (ert-deftest orgx-bulk-ops-notes-ignore-and-one-test ()

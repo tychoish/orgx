@@ -400,6 +400,8 @@ Other tests may leave `orgx-mode-turn-on' on the hook."
   (should (eq #'orgx-capture-shell-toggle (keymap-lookup orgx-command-map "c t")))
   (should (eq #'orgx-capture-shell-transient (keymap-lookup orgx-command-map "c x")))
   (should (eq #'orgx-bulk-todo-state (keymap-lookup orgx-command-map "b b")))
+  (should (eq #'orgx-bulk-done (keymap-lookup orgx-command-map "b d")))
+  (should (eq #'orgx-bulk-cancel (keymap-lookup orgx-command-map "b c")))
   (should (eq #'orgx-bulk-resume (keymap-lookup orgx-command-map "b r"))))
 
 (ert-deftest orgx-command-map-no-modifiers-test ()

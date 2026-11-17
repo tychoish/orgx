@@ -72,6 +72,8 @@
 (declare-function orgx-denote-agenda-composite "orgx-denote")
 (declare-function orgx-denote-agenda-completed-plans "orgx-denote")
 (declare-function orgx-bulk-todo-state "orgx-bulk")
+(declare-function orgx-bulk-done "orgx-bulk")
+(declare-function orgx-bulk-cancel "orgx-bulk")
 (declare-function orgx-agenda-bulk-action "orgx-bulk-agenda")
 (declare-function orgx-bulk-resume "orgx-bulk-buffer")
 
@@ -670,6 +672,8 @@ buffer position."
   :name "orgx-bulk"
   :doc "Bulk operation commands under C-c o b (orgx-mode)."
   "b" #'orgx-bulk-todo-state
+  "d" #'orgx-bulk-done
+  "c" #'orgx-bulk-cancel
   "r" #'orgx-bulk-resume)
 
 (defvar-keymap orgx-link-map

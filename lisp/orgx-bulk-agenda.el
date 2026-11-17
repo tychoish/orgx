@@ -402,8 +402,10 @@ steps.  Returns the agenda buffer."
 
 ;;; Interactive Scope Reader (used by `orgx-bulk-todo-state')
 
-(defun orgx-bulk-batch-read-scope ()
-  "Interactively read a bulk scope and return `(SCOPE TARGETS DESCRIPTION)'."
+(defun orgx-bulk-batch-read-scope (&optional no-match)
+  "Interactively read a bulk scope and return `(SCOPE TARGETS DESCRIPTION)'.
+Unless NO-MATCH, also ask for an Org tags/properties match; with it the
+scope takes every open heading (any TODO or QUESTION state)."
   (if (derived-mode-p 'org-agenda-mode)
       (let* ((scope (list :type 'agenda :buffer-name (buffer-name)))
              (pair (orgx-bulk-batch-for-scope scope)))
@@ -418,7 +420,11 @@ steps.  Returns the agenda buffer."
                             (when (fboundp 'orgx-denote-files)
                               '("denote files")))
                     nil t))
-           (match (string-trim (read-string "Match (empty for all open TODOs): ")))
+           (match (if no-match
+                      ""
+                    (string-trim
+                     (read-string
+                      "Tags/property match, e.g. +tag or TODO=\"QUESTION\" (empty: all open): "))))
            (match-or-nil (unless (string-empty-p match) match))
            (scope
             (pcase choice

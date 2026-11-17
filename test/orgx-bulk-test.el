@@ -410,6 +410,24 @@
         (should (equal id (hitl-plan-id (orgx-bulk-load id)))))
       (should-error (orgx-bulk-load "no-such-plan")))))
 
+(ert-deftest orgx-bulk-done-and-cancel-do-not-ask-for-match-test ()
+  ;; Neither command prompts for a match, and both take TODO and QUESTION.
+  (orgx-bulk-test--with-env f "#+TODO: TODO | DONE\n#+TODO: QUESTION | ANSWERED\n#+TODO: BLOCKED | CANCELED\n* TODO A\n* QUESTION B\n* DONE C\n"
+    (with-current-buffer (find-file-noselect f)
+      (org-mode)
+      (org-set-regexps-and-options)
+      (dolist (cmd '(orgx-bulk-done orgx-bulk-cancel))
+        (let ((plan nil))
+          (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "current buffer"))
+                    ((symbol-function 'read-string)
+                     (lambda (&rest _) (error "Unexpected prompt")))
+                    ((symbol-function 'orgx-bulk-review)
+                     (lambda (p &rest _) (setq plan p))))
+            (funcall cmd))
+          (should (equal (mapcar (lambda (tg) (plist-get tg :heading))
+                                 (mapcar #'hitl-plan-step-target (hitl-plan-steps plan)))
+                         '("A" "B"))))))))
+
 (ert-deftest orgx-bulk-without-display-restores-windows-test ()
   ;; Popping a buffer inside the macro neither shows it nor changes windows.
   (let ((buf (generate-new-buffer " *orgx-display-probe*"))

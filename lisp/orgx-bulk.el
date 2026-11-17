@@ -808,10 +808,11 @@ existing keyword line is rewritten; the current buffer must visit FILE."
 ;;; Interactive Entry Point (`C-c o b')
 
 ;;;###autoload
-(defun orgx-bulk-todo-state (state)
+(defun orgx-bulk-todo-state (state &optional no-match)
   "Create a bulk plan moving headings to STATE and open its plan buffer.
 Scope is the agenda's marked (or all) entries when called from an agenda,
-otherwise the current buffer, the agenda files, or the denote files."
+otherwise the current buffer, the agenda files, or the denote files.
+Unless NO-MATCH, a match string narrows the scope."
   (interactive
    (list (completing-read "Move to state: "
                           (seq-uniq (append org-todo-keywords-1 org-done-keywords))
@@ -819,11 +820,14 @@ otherwise the current buffer, the agenda files, or the denote files."
   (require 'orgx-bulk-ops)
   (require 'orgx-bulk-agenda)
   (require 'orgx-bulk-buffer)
-  (pcase-let ((`(,scope ,targets ,desc) (orgx-bulk-batch-read-scope)))
+  (pcase-let ((`(,scope ,targets ,desc) (orgx-bulk-batch-read-scope no-match)))
     (unless targets
-      (user-error "No matching tasks"))
+      (user-error "No matching tasks (scope: %s)" desc))
     (let* ((note (when (eq orgx-bulk-log-notes 'one)
-                   (read-string (format "Log note for -> %s: " state))))
+                   (read-string (format "Log note for -> %s: "
+                                        (if (equal state orgx-bulk-done-pseudo-state)
+                                            "done"
+                                          state)))))
            (plan (orgx-bulk-create-plan
                   :scope scope
                   :targets targets
@@ -832,6 +836,22 @@ otherwise the current buffer, the agenda files, or the denote files."
                   :log-notes orgx-bulk-log-notes
                   :note note)))
       (orgx-bulk-review plan t))))
+
+;;;###autoload
+(defun orgx-bulk-done ()
+  "Bulk-close every open heading in scope as done, TODO and QUESTION alike.
+Each heading moves to the done state of its own keyword sequence (TODO to
+DONE, QUESTION to ANSWERED).  See `orgx-bulk-todo-state' for scope."
+  (interactive)
+  (require 'orgx-bulk-ops)
+  (orgx-bulk-todo-state orgx-bulk-done-pseudo-state t))
+
+;;;###autoload
+(defun orgx-bulk-cancel ()
+  "Bulk-close every open heading in scope as CANCELED, TODO and QUESTION alike.
+See `orgx-bulk-todo-state' for scope."
+  (interactive)
+  (orgx-bulk-todo-state "CANCELED" t))
 
 (provide 'orgx-bulk)
 ;;; orgx-bulk.el ends here

@@ -36,6 +36,8 @@ Other packages provide everything else, as the table shows:
 
 ~C-c o b b~ (~orgx-bulk-todo-state~) is a shortcut for the common case: it prompts for a target state and a scope (the agenda's marked or all entries, the current buffer, agenda files or denote files), then opens a =todo-state= plan in the review buffer.
 
+Two more shortcuts close a whole plan in one operation, open TODOs and open QUESTIONs alike: ~C-c o b d~ (~orgx-bulk-done~) moves each heading to the done state of its own sequence (TODO to DONE, QUESTION to ANSWERED), and ~C-c o b c~ (~orgx-bulk-cancel~) moves every heading to =CANCELED=. Both ask only for a scope, not a match string, and take every open heading.
+
 * Agenda Driver (=B=) and Prefix Arguments
 
 In =org-agenda-mode= (when =orgx-agenda-minor-mode= is active), =B= runs ~orgx-agenda-bulk-action~:
