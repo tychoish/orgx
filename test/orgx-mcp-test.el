@@ -44,7 +44,7 @@ Signal an error carrying the handler's error message on failure."
          (when (or (and (buffer-file-name buf)
                         (equal (expand-file-name (buffer-file-name buf))
                                (expand-file-name ,var)))
-                   (string-prefix-p "*Org Agenda" (buffer-name buf))
+                   (string-match-p "\\`\\( \\)?\\*Org Agenda" (buffer-name buf))
                    (string-prefix-p "*hitl-plan:" (buffer-name buf)))
            (with-current-buffer buf (set-buffer-modified-p nil))
            (kill-buffer buf)))
@@ -259,7 +259,7 @@ Signal an error carrying the handler's error message on failure."
 
 (defun orgx-mcp-test--agenda-buffers ()
   "Return the live agenda buffers."
-  (seq-filter (lambda (b) (string-prefix-p "*Org Agenda" (buffer-name b))) (buffer-list)))
+  (seq-filter (lambda (b) (string-match-p "\\`\\( \\)?\\*Org Agenda" (buffer-name b))) (buffer-list)))
 
 (ert-deftest orgx-mcp-bulk-plan-list-reports-errors-test ()
   "`bulk_plan_list' returns hitl's result, including its (:error MSG)."

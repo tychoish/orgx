@@ -194,6 +194,19 @@ file list the caller gave."
              (or (null only-open)
                  (and state (not (member state org-done-keywords)))))))))
 
+(defun orgx-bulk-agenda--hide-buffer (buffer label)
+  "Rename agenda BUFFER to a hidden, unique name for LABEL and bury it.
+The leading space keeps it out of buffer lists, and the unique name keeps
+it from being reused as a sticky agenda; all such buffers match
+`orgx-bulk-agenda-buffer-regexp' for cleanup."
+  (with-current-buffer buffer
+    (rename-buffer (format " *Org Agenda(orgx-bulk:%s)*" label) t))
+  (bury-buffer buffer)
+  buffer)
+
+(defconst orgx-bulk-agenda-buffer-regexp "\\` \\*Org Agenda(orgx-bulk"
+  "Regexp matching the hidden agenda buffers orgx-bulk creates.")
+
 (defun orgx-bulk-batch-for-scope (scope)
   "Build or reuse an agenda-buffer batch for SCOPE.
 Returns `(AGENDA-BUFFER . TARGETS)' and sets buffer-local
@@ -246,17 +259,21 @@ Returns `(AGENDA-BUFFER . TARGETS)' and sets buffer-local
                  (batch-markers nil)
                  (targets nil))
             (if (null files)
-                (let ((empty-buf (get-buffer-create "*Org Agenda(orgx-bulk-empty)*")))
+                (let ((empty-buf (generate-new-buffer " *Org Agenda(orgx-bulk:empty)*")))
                   (with-current-buffer empty-buf
                     (unless (derived-mode-p 'org-agenda-mode)
                       (org-agenda-mode))
                     (setq-local orgx-bulk-batch-markers nil))
+                  (bury-buffer empty-buf)
                   (cons empty-buf nil))
-              (save-window-excursion
+              (orgx-bulk--without-display
                 (let ((org-agenda-files files)
                       (org-agenda-sticky t)
-                      (org-agenda-window-setup 'current-window)
                       (org-agenda-bulk-marked-entries nil))
+                  ;; A sticky agenda buffer for this match is reused as-is, so a
+                  ;; stale (even empty) one would hide the current files' entries.
+                  (when-let* ((stale (get-buffer (format "*Org Agenda(m:%s)*" match-str))))
+                    (kill-buffer stale))
                   (orgx-bulk--with-safe-visiting
                     (org-tags-view nil match-str))
                   (setq agenda-buf (current-buffer))
@@ -275,6 +292,12 @@ Returns `(AGENDA-BUFFER . TARGETS)' and sets buffer-local
                   (setq batch-markers (nreverse batch-markers)
                         targets (nreverse (delq nil targets)))
                   (setq-local orgx-bulk-batch-markers batch-markers)))
+              (orgx-bulk-agenda--hide-buffer
+               agenda-buf
+               (format "%s%s" type
+                       (if (cdr files)
+                           (format " %d files" (length files))
+                         (concat " " (file-name-base (car files))))))
               (cons agenda-buf targets))))
       (setq org-agenda-bulk-marked-entries saved-global-marks))))
 
@@ -284,12 +307,12 @@ Returns `(AGENDA-BUFFER . BATCH-MARKERS)' where each element of BATCH-MARKERS
 is the exact (`eq') `org-hd-marker' property on a line in AGENDA-BUFFER."
   (let* ((scope (hitl-plan-scope plan))
          (buf-name (or (plist-get scope :buffer-name)
-                       (format "*Org Agenda(orgx-bulk:%s)*" (hitl-plan-id plan))))
+                       (format " *Org Agenda(orgx-bulk:%s)*" (hitl-plan-id plan))))
          (buf (get-buffer buf-name)))
     ;; Never repurpose an arbitrary buffer for an untrusted plan.
     (when (and buf (hitl-plan-restricted-p) (not (orgx-bulk--agenda-buffer-p buf)))
       (setq buf nil
-            buf-name (format "*Org Agenda(orgx-bulk:%s)*" (hitl-plan-id plan))
+            buf-name (format " *Org Agenda(orgx-bulk:%s)*" (hitl-plan-id plan))
             buf (get-buffer buf-name)))
     (unless (buffer-live-p buf)
       (let ((files (or (orgx-bulk-agenda--scope-files scope)
@@ -300,18 +323,22 @@ is the exact (`eq') `org-hd-marker' property on a line in AGENDA-BUFFER."
                                              (buffer-file-name (marker-buffer m))))
                                       resolved-markers))))))
         (if files
-            (save-window-excursion
+            (orgx-bulk--without-display
               (let ((org-agenda-files files)
                     (org-agenda-sticky t)
-                    (org-agenda-window-setup 'current-window)
                     (match (or (plist-get scope :match) "LEVEL>=1")))
+                (when-let* ((stale (get-buffer (format "*Org Agenda(m:%s)*"
+                                                       (if (string-empty-p match) "LEVEL>=1" match)))))
+                  (kill-buffer stale))
                 (orgx-bulk--with-safe-visiting
                   (org-tags-view nil (if (string-empty-p match) "LEVEL>=1" match)))
-                (setq buf (current-buffer))))
+                (setq buf (current-buffer))
+                (rename-buffer buf-name t)))
           (setq buf (get-buffer-create buf-name))
           (with-current-buffer buf
             (unless (derived-mode-p 'org-agenda-mode)
-              (org-agenda-mode))))))
+              (org-agenda-mode)))))
+      (bury-buffer buf))
     (with-current-buffer buf
       (let (batch-markers)
         (dolist (rm resolved-markers)

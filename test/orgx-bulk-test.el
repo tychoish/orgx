@@ -31,7 +31,7 @@
          (when (or (and (buffer-file-name buf)
                         (equal (expand-file-name (buffer-file-name buf))
                                (expand-file-name ,file-var)))
-                   (string-prefix-p "*Org Agenda" (buffer-name buf))
+                   (string-match-p "\\`\\( \\)?\\*Org Agenda" (buffer-name buf))
                    (string-prefix-p "*hitl-plan:" (buffer-name buf)))
            (with-current-buffer buf (set-buffer-modified-p nil))
            (kill-buffer buf)))
@@ -409,6 +409,21 @@
       (let ((default-directory temporary-file-directory))
         (should (equal id (hitl-plan-id (orgx-bulk-load id)))))
       (should-error (orgx-bulk-load "no-such-plan")))))
+
+(ert-deftest orgx-bulk-without-display-restores-windows-test ()
+  ;; Popping a buffer inside the macro neither shows it nor changes windows.
+  (let ((buf (generate-new-buffer " *orgx-display-probe*"))
+        (before (current-window-configuration))
+        (win-buf (window-buffer)))
+    (unwind-protect
+        (progn
+          (orgx-bulk--without-display
+            (pop-to-buffer buf)
+            (should (eq org-agenda-window-setup 'current-window)))
+          (should (eq (window-buffer) win-buf))
+          (should-not (get-buffer-window buf t))
+          (should (compare-window-configurations before (current-window-configuration))))
+      (kill-buffer buf))))
 
 (provide 'orgx-bulk-test)
 ;;; orgx-bulk-test.el ends here

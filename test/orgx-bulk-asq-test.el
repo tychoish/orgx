@@ -48,7 +48,7 @@
            (when (or (and (buffer-file-name buf)
                           (equal (expand-file-name (buffer-file-name buf))
                                  (expand-file-name ,file-var)))
-                     (string-prefix-p "*Org Agenda" (buffer-name buf)))
+                     (string-match-p "\\`\\( \\)?\\*Org Agenda" (buffer-name buf)))
              (with-current-buffer buf (set-buffer-modified-p nil))
              (kill-buffer buf)))
          (when (file-exists-p ,file-var)

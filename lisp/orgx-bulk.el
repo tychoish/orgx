@@ -218,6 +218,19 @@ File-local `eval' forms must never run on behalf of an MCP-origin plan."
          (enable-dir-local-variables (if (hitl-plan-restricted-p) nil enable-dir-local-variables)))
      ,@body))
 
+(defvar org-agenda-window-setup)
+
+(defmacro orgx-bulk--without-display (&rest body)
+  "Run BODY, which drives an internal agenda buffer, without showing it.
+The agenda is an implementation detail: `display-buffer' is suppressed,
+the window setup is forced to the selected window and the window
+configuration is restored afterwards."
+  (declare (indent 0))
+  `(save-window-excursion
+     (let ((display-buffer-overriding-action '(display-buffer-no-window))
+           (org-agenda-window-setup 'current-window))
+       ,@body)))
+
 (defun orgx-bulk--visit (file)
   "Return the buffer visiting FILE, opened safely when restricted."
   (orgx-bulk--with-safe-visiting (find-file-noselect file)))
@@ -680,7 +693,8 @@ none).  oab, bound buffer-locally in that buffer, calls back into
                                   last-op-p)
                              (symbol-function 'org-agenda-redo)
                            #'ignore)))
-                (org-agenda-bulk-action))))
+                (orgx-bulk--without-display
+                  (org-agenda-bulk-action)))))
         (quit (setq quitted t)))
       (if (or quitted quit-flag)
           (progn (setq quit-flag nil)

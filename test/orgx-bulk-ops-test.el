@@ -30,7 +30,7 @@
          (when (or (and (buffer-file-name buf)
                         (string-prefix-p (file-name-sans-extension ,file-var)
                                          (buffer-file-name buf)))
-                   (string-prefix-p "*Org Agenda" (buffer-name buf)))
+                   (string-match-p "\\`\\( \\)?\\*Org Agenda" (buffer-name buf)))
            (with-current-buffer buf (set-buffer-modified-p nil))
            (kill-buffer buf)))
        (dolist (path (list ,file-var (concat ,file-var "_archive")))

@@ -33,7 +33,7 @@
                         (member (expand-file-name (buffer-file-name buf))
                                 (list (expand-file-name ,f1-var)
                                       (expand-file-name ,f2-var))))
-                   (string-prefix-p "*Org Agenda" (buffer-name buf))
+                   (string-match-p "\\`\\( \\)?\\*Org Agenda" (buffer-name buf))
                    (string-prefix-p "*hitl-plan:" (buffer-name buf)))
            (with-current-buffer buf (set-buffer-modified-p nil))
            (kill-buffer buf)))
@@ -149,3 +149,34 @@
 
 (provide 'orgx-bulk-agenda-test)
 ;;; orgx-bulk-agenda-test.el ends here
+
+(ert-deftest orgx-bulk-agenda-scope-ignores-stale-sticky-buffer-test ()
+  "A leftover empty sticky agenda buffer must not hide the scope's entries."
+  (let ((f (make-temp-file "orgx-stale" nil ".org" "* TODO a\n* TODO b\n"))
+        (orgx-bulk-assign-ids nil))
+    (unwind-protect
+        (progn
+          (with-current-buffer (get-buffer-create "*Org Agenda(m:LEVEL>=1)*")
+            (org-agenda-mode))
+          (let ((pair (orgx-bulk-batch-for-scope
+                       (list :type 'buffer :file f :files (list f)
+                             :only-open t))))
+            (should (= 2 (length (cdr pair))))
+            ;; Named for the batch, not left as the reusable sticky buffer.
+            (should (string-match-p orgx-bulk-agenda-buffer-regexp
+                                    (buffer-name (car pair))))
+            ;; Hidden from buffer lists and buried.
+            (should (string-prefix-p " " (buffer-name (car pair))))
+            (should (eq (car pair) (car (last (buffer-list)))))
+            (should-not (get-buffer "*Org Agenda(m:LEVEL>=1)*"))
+            ;; A second build gets its own buffer.
+            (should-not (eq (car pair)
+                            (car (orgx-bulk-batch-for-scope
+                                  (list :type 'buffer :file f :files (list f)
+                                        :only-open t)))))))
+      (dolist (b (buffer-list))
+        (when (or (string-match-p "\\`\\( \\)?\\*Org Agenda" (buffer-name b))
+                  (equal (buffer-file-name b) f))
+          (with-current-buffer b (set-buffer-modified-p nil))
+          (kill-buffer b)))
+      (delete-file f))))
