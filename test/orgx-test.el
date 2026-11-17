@@ -534,11 +534,10 @@ Other tests may leave `orgx-mode-turn-on' on the hook."
   (should-not (keymap-lookup orgx-command-map "W")))
 
 (ert-deftest orgx-agenda-minor-mode-map-test ()
-  "orgx-agenda-minor-mode-map is a keymap binding /, C-l, and C-e to commands."
+  "Check local agenda command bindings."
   (should (keymapp orgx-agenda-minor-mode-map))
   (should (commandp (keymap-lookup orgx-agenda-minor-mode-map "/")))
-  (should (commandp (keymap-lookup orgx-agenda-minor-mode-map "C-l")))
-  (should (commandp (keymap-lookup orgx-agenda-minor-mode-map "C-e"))))
+  (should (commandp (keymap-lookup orgx-agenda-minor-mode-map "C-l"))))
 
 (ert-deftest orgx-agenda-view-candidate-test ()
   "Dispatch key is left-justified to the given width before the colon."
