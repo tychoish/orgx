@@ -397,8 +397,18 @@ Other tests may leave `orgx-mode-turn-on' on the hook."
   (should (eq #'orgx-agenda-files-open (keymap-lookup orgx-command-map "o")))
   (should (eq #'orgx-capture (keymap-lookup orgx-command-map "j")))
   (should (eq #'orgx-agenda-for-file (keymap-lookup orgx-command-map "/")))
-  (should (eq #'orgx-capture-shell-toggle (keymap-lookup orgx-command-map "C-s")))
-  (should (eq #'orgx-capture-shell-transient (keymap-lookup orgx-command-map "C-t"))))
+  (should (eq #'orgx-capture-shell-toggle (keymap-lookup orgx-command-map "c t")))
+  (should (eq #'orgx-capture-shell-transient (keymap-lookup orgx-command-map "c x")))
+  (should (eq #'orgx-bulk-todo-state (keymap-lookup orgx-command-map "b b")))
+  (should (eq #'orgx-bulk-resume (keymap-lookup orgx-command-map "b r"))))
+
+(ert-deftest orgx-command-map-no-modifiers-test ()
+  "Keys under the `C-c o' prefix are plain, lowercase, and not duplicated."
+  (let (keys)
+    (map-keymap
+     (lambda (event _) (push event keys))
+     orgx-command-map)
+    (should (seq-every-p (lambda (k) (and (characterp k) (not (<= ?A k ?Z)) (zerop (logand k #xfc000000)) (>= k 32))) keys))))
 
 (ert-deftest orgx-global-minor-mode-test ()
   "Test that activating orgx-global-minor-mode runs setup and sets hooks."

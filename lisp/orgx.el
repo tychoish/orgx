@@ -653,7 +653,7 @@ buffer position."
 (keymap-set orgx-capture-map "r" #'org-capture-refile)
 (keymap-set orgx-capture-map "w" #'org-capture-refile)
 (keymap-set orgx-capture-map "s" #'orgx-capture-shell)
-(keymap-set orgx-capture-map "C-t" #'orgx-capture-shell-transient)
+(keymap-set orgx-capture-map "x" #'orgx-capture-shell-transient)
 
 (defvar-keymap orgx-archive-map
   :name "orgx-archive"
@@ -665,6 +665,12 @@ buffer position."
 (keymap-set orgx-archive-map "t" #'org-archive-set-tag)
 (keymap-set orgx-archive-map "s" (cons "current→sibling" #'org-archive-to-archive-sibling))
 (keymap-set orgx-archive-map "d" (cons "done+archive" #'orgx-mark-done-and-archive))
+
+(defvar-keymap orgx-bulk-map
+  :name "orgx-bulk"
+  :doc "Bulk operation commands under C-c o b (orgx-mode)."
+  "b" #'orgx-bulk-todo-state
+  "r" #'orgx-bulk-resume)
 
 (defvar-keymap orgx-link-map
   :name "org-link"
@@ -680,8 +686,7 @@ buffer position."
 
 (keymap-set orgx-command-map "4" #'org-agenda)
 (keymap-set orgx-command-map "a" #'orgx-agenda-view)
-(keymap-set orgx-command-map "b" #'orgx-bulk-todo-state)
-(keymap-set orgx-command-map "B" #'orgx-bulk-resume)
+(keymap-set orgx-command-map "b" (cons "bulk" orgx-bulk-map))
 (keymap-set orgx-command-map "c" orgx-capture-map)
 (keymap-set orgx-command-map "d" #'orgx-insert-date)
 (keymap-set orgx-command-map "f" orgx-archive-map)
@@ -696,8 +701,6 @@ buffer position."
 (keymap-set orgx-command-map "q" #'agent-shell-queue-org-refile-from-heading)
 (keymap-set orgx-command-map "r" #'orgx-agenda-files-reload)
 (keymap-set orgx-command-map "s" #'org-save-all-org-buffers)
-(keymap-set orgx-command-map "C-s" #'orgx-capture-shell-toggle)
-(keymap-set orgx-command-map "C-t" #'orgx-capture-shell-transient)
 (keymap-set orgx-command-map "t" #'org-set-tags-command)
 (keymap-set orgx-command-map "u" (cons "untagged-in-file" #'orgx-agenda-untagged-in-file))
 (keymap-set orgx-command-map "w" #'org-refile)

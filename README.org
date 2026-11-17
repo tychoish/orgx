@@ -26,10 +26,9 @@ Org mode extensions, structured capture templates, continuous REPL capture shell
 
 | Key Sequence  | Command                         | Description                                      |
 |---------------+---------------------------------+--------------------------------------------------|
-| =C-c o C-s=   | ~orgx-capture-shell-toggle~     | Toggle 15-line bottom popup capture shell buffer |
+| =C-c o c t=   | ~orgx-capture-shell-toggle~     | Toggle 15-line bottom popup capture shell buffer |
 | =C-c o c s=   | ~orgx-capture-shell~            | Open/focus capture shell buffer directly         |
-| =C-c o C-t=   | ~orgx-capture-shell-transient~  | Open transient capture modal menu                |
-| =C-c o c C-t= | ~orgx-capture-shell-transient~  | Open transient capture modal menu from capture   |
+| =C-c o c x=   | ~orgx-capture-shell-transient~  | Open transient capture modal menu                |
 
 * Repository Layout
 

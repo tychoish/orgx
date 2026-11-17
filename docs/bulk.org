@@ -11,7 +11,7 @@ The unit of work is an *agenda buffer*. With =org-agenda-sticky= enabled, each s
 orgx owns only the =org-agenda= domain, which =orgx-bulk.el= registers on =hitl-plan= with [[file:../../hitl/hitl-plan.el::hitl-plan-register-domain][~hitl-plan-register-domain~]]. The domain consists of four pieces:
 
 - *Operations*: the 11 built-in operations in [[file:../lisp/orgx-bulk-ops.el::orgx-bulk-register-op][=orgx-bulk-ops.el=]] and the [[file:../lisp/orgx-bulk.el::orgx-bulk-register-op][~orgx-bulk-register-op~]] function that defines them.
-- *Entry points*: =B= in agenda buffers ([[file:../lisp/orgx-bulk-agenda.el::orgx-agenda-bulk-action][~orgx-agenda-bulk-action~]]), =C-c o b= ([[file:../lisp/orgx-bulk.el::orgx-bulk-todo-state][~orgx-bulk-todo-state~]]) and =C-c o B= ([[file:../lisp/orgx-bulk-buffer.el::orgx-bulk-resume][~orgx-bulk-resume~]]).
+- *Entry points*: =B= in agenda buffers ([[file:../lisp/orgx-bulk-agenda.el::orgx-agenda-bulk-action][~orgx-agenda-bulk-action~]]), =C-c o b b= ([[file:../lisp/orgx-bulk.el::orgx-bulk-todo-state][~orgx-bulk-todo-state~]]) and =C-c o b r= ([[file:../lisp/orgx-bulk-buffer.el::orgx-bulk-resume][~orgx-bulk-resume~]]).
 - *Scope builder*: [[file:../lisp/orgx-bulk-agenda.el::orgx-bulk-batch-for-scope][~orgx-bulk-batch-for-scope~]] turns a scope (marked agenda entries, a file list, agenda files or denote files) into a sticky agenda buffer and its targets.
 - *Denote sync hook*: [[file:../lisp/orgx-bulk.el::orgx-bulk-denote-sync-execution-status][~orgx-bulk-denote-sync-execution-status~]] runs from [[file:../lisp/orgx-bulk.el::orgx-bulk-after-apply-functions][~orgx-bulk-after-apply-functions~]].
 
@@ -31,10 +31,10 @@ Other packages provide everything else, as the table shows:
    - The plan opens in a review buffer (=*hitl-plan: <id>*=); execute it from there.
    - With =C-u B= the plan executes immediately instead.
 3. Resume an interrupted or draft plan at any time:
-   - Key: =C-c o B=
+   - Key: =C-c o b r=
    - Command: ~M-x orgx-bulk-resume~
 
-~C-c o b~ (~orgx-bulk-todo-state~) is a shortcut for the common case: it prompts for a target state and a scope (the agenda's marked or all entries, the current buffer, agenda files or denote files), then opens a =todo-state= plan in the review buffer.
+~C-c o b b~ (~orgx-bulk-todo-state~) is a shortcut for the common case: it prompts for a target state and a scope (the agenda's marked or all entries, the current buffer, agenda files or denote files), then opens a =todo-state= plan in the review buffer.
 
 * Agenda Driver (=B=) and Prefix Arguments
 
@@ -64,7 +64,7 @@ A review buffer (=*hitl-plan: <id>*=) shows the plan metadata, the operation pip
 | =d= / =k= | ~hitl-plan-ui-discard~ | After confirmation, mark the plan =discarded=, save it (the =.eld= file is kept) and close the buffer |
 | =q= | ~quit-window~ | Bury the review buffer (plan remains saved on disk) |
 
-If you press =C-g= during execution, completed steps remain recorded as =done= on disk, the remaining steps stay =pending=, and the plan status becomes =paused=. Run ~M-x orgx-bulk-resume~ (=C-c o B=) to reopen the plan and continue.
+If you press =C-g= during execution, completed steps remain recorded as =done= on disk, the remaining steps stay =pending=, and the plan status becomes =paused=. Run ~M-x orgx-bulk-resume~ (=C-c o b r=) to reopen the plan and continue.
 
 * Log-Note Modes and Blocking Policy
 

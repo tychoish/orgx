@@ -7,10 +7,10 @@ The Orgx Capture Shell (=orgx-capture-shell.el=) provides a continuous, non-moda
 * Quickstart
 
 1. Toggle the capture shell popup window:
-   - Key: =C-c o C-s= or =C-c o c s=
+   - Key: =C-c o c t= (toggle) or =C-c o c s=
    - Command: ~M-x orgx-capture-shell-toggle~
 2. Open the transient menu:
-   - Key: =C-c o C-t= or =C-c o c C-t=
+   - Key: =C-c o c x=
    - Command: ~M-x orgx-capture-shell-transient~
 
 * Architecture & Features
