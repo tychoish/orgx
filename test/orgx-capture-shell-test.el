@@ -72,25 +72,26 @@
 
 (ert-deftest orgx-capture-shell-slash-commands-test ()
   "Test slash command dispatching."
-  (let ((orgx-capture-shell-current-file "/tmp/initial.org")
-        (orgx-capture-shell-current-headline "Tasks")
-        (orgx-capture-shell-current-template 'task)
-        (orgx-capture-shell-undo-ring nil))
-    ;; Switch target
-    (let ((msg (orgx-capture-shell--execute-slash-command "/target /tmp/new.org:Backlog")))
-      (should (string-match-p "Target set to new.org \\[Backlog\\]" msg))
-      (should (string-equal orgx-capture-shell-current-file "/tmp/new.org"))
-      (should (string-equal orgx-capture-shell-current-headline "Backlog")))
-    ;; Switch template
-    (let ((msg (orgx-capture-shell--execute-slash-command "/template journal")))
-      (should (string-match-p "Template switched to: journal" msg))
-      (should (eq orgx-capture-shell-current-template 'journal)))
-    ;; Query help
-    (let ((msg (orgx-capture-shell--execute-slash-command "/help")))
-      (should (string-match-p "Available slash commands" msg)))
-    ;; Query target
-    (let ((msg (orgx-capture-shell--execute-slash-command "/target")))
-      (should (string-match-p "Current target:" msg)))))
+  (orgx-capture-shell-test--with-file "* Backlog\n"
+    (let ((orgx-capture-shell-current-file file)
+          (orgx-capture-shell-current-headline "Tasks")
+          (orgx-capture-shell-current-template 'task)
+          (orgx-capture-shell-undo-ring nil))
+      ;; Switch target
+      (let ((msg (orgx-capture-shell--execute-slash-command (format "/target %s:Backlog" file))))
+        (should (string-match-p (format "Target set to %s \\[Backlog\\]" (regexp-quote (file-name-nondirectory file))) msg))
+        (should (string-equal orgx-capture-shell-current-file (expand-file-name file)))
+        (should (string-equal orgx-capture-shell-current-headline "Backlog")))
+      ;; Switch template
+      (let ((msg (orgx-capture-shell--execute-slash-command "/template journal")))
+        (should (string-match-p "Template switched to: journal" msg))
+        (should (eq orgx-capture-shell-current-template 'journal)))
+      ;; Query help
+      (let ((msg (orgx-capture-shell--execute-slash-command "/help")))
+        (should (string-match-p "Available slash commands" msg)))
+      ;; Query target
+      (let ((msg (orgx-capture-shell--execute-slash-command "/target")))
+        (should (string-match-p "Current target:" msg))))))
 
 
 ;;; Helpers
@@ -323,11 +324,79 @@
                             (orgx-capture-shell--execute-slash-command "/tpl")))))
 
 (ert-deftest orgx-capture-shell-target-slash-headline-with-colon-test ()
-  (let ((orgx-capture-shell-current-file nil)
-        (orgx-capture-shell-current-headline nil))
-    (orgx-capture-shell--execute-slash-command "/target /tmp/x.org:Projects/My Tasks: now")
-    (should (equal orgx-capture-shell-current-file "/tmp/x.org"))
-    (should (equal orgx-capture-shell-current-headline "Projects/My Tasks: now"))))
+  (orgx-capture-shell-test--with-file "* Projects\n** My Tasks: now\n"
+    (let ((orgx-capture-shell-current-file nil)
+          (orgx-capture-shell-current-headline nil))
+      (orgx-capture-shell--execute-slash-command (format "/target %s:Projects/My Tasks: now" file))
+      (should (equal orgx-capture-shell-current-file (expand-file-name file)))
+      (should (equal orgx-capture-shell-current-headline "Projects/My Tasks: now")))))
+
+(ert-deftest orgx-capture-shell-validation-test ()
+  "Test validation on target file and template selection."
+  ;; Slash /target validation: non-existent file
+  (let ((msg (orgx-capture-shell--execute-slash-command "/target /tmp/nonexistent-xyz-987.org")))
+    (should (string-match-p "Error: Target file does not exist" msg)))
+  ;; Slash /target validation: non-org file
+  (let* ((tmp (make-temp-file "test-" nil ".txt" "text file")))
+    (unwind-protect
+        (let ((msg (orgx-capture-shell--execute-slash-command (format "/target %s" tmp))))
+          (should (string-match-p "Error: Target file must be an Org file" msg)))
+      (delete-file tmp)))
+  ;; Slash /template validation: invalid template
+  (let ((msg (orgx-capture-shell--execute-slash-command "/template non-existent-template-foo")))
+    (should (string-match-p "Unknown template: non-existent-template-foo" msg)))
+  ;; orgx-capture-shell-set-target-file: invalid file errors
+  (should-error (orgx-capture-shell-set-target-file "/tmp/nonexistent-xyz-987.org")
+                :type 'user-error)
+  (let* ((tmp (make-temp-file "test-" nil ".txt" "text file")))
+    (unwind-protect
+        (should-error (orgx-capture-shell-set-target-file tmp) :type 'user-error)
+      (delete-file tmp)))
+  ;; orgx-capture-shell-set-template: invalid template errors
+  (should-error (orgx-capture-shell-set-template 'not-a-valid-template)
+                :type 'user-error))
+
+(ert-deftest orgx-capture-shell-prompt-read-only-test ()
+  "Prompt area should have read-only property and comint-prompt-read-only enabled."
+  (let ((p (orgx-capture-shell--prompt-string)))
+    (should (get-text-property 0 'read-only p))
+    (should (equal (get-text-property 0 'front-sticky p) '(read-only))))
+  (with-temp-buffer
+    (orgx-capture-shell-mode)
+    (should (eq comint-prompt-read-only t))))
+
+(ert-deftest orgx-capture-shell-welcome-option-test ()
+  "Welcome message should be controlled by orgx-capture-shell-show-welcome."
+  (let ((orgx-capture-shell-show-welcome nil))
+    (let ((buf (get-buffer "*orgx-capture-shell-test*")))
+      (when buf (kill-buffer buf)))
+    (cl-letf (((symbol-function 'pop-to-buffer) #'ignore)
+              ((symbol-function 'orgx-capture-shell-buffer-name)
+               (lambda () "*orgx-capture-shell-test*")))
+      (let ((buf (orgx-capture-shell)))
+        (unwind-protect
+            (with-current-buffer buf
+              (should-not (string-match-p "Orgx Capture Shell (type /help for commands)" (buffer-string))))
+          (kill-buffer buf)))))
+  (let ((orgx-capture-shell-show-welcome t))
+    (let ((buf (get-buffer "*orgx-capture-shell-test*")))
+      (when buf (kill-buffer buf)))
+    (cl-letf (((symbol-function 'pop-to-buffer) #'ignore)
+              ((symbol-function 'orgx-capture-shell-buffer-name)
+               (lambda () "*orgx-capture-shell-test*")))
+      (let ((buf (orgx-capture-shell)))
+        (unwind-protect
+            (with-current-buffer buf
+              (should (string-match-p "Orgx Capture Shell (type /help for commands)" (buffer-string))))
+          (kill-buffer buf))))))
+
+(ert-deftest orgx-capture-shell-hide-slash-commands-test ()
+  "When slash commands are hidden, capf returns nil and execution is blocked."
+  (orgx-capture-shell-test--with-shell "/ta"
+    (let ((orgx-capture-shell-hide-slash-commands t))
+      (should-not (orgx-capture-shell-completion-at-point))
+      (should (string-match-p "Slash commands are disabled"
+                              (orgx-capture-shell--execute-slash-command "/target"))))))
 
 (ert-deftest orgx-capture-shell-unknown-slash-test ()
   (should (string-match-p "Unknown command: /zzz"

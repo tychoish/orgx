@@ -127,6 +127,17 @@ never lands after a trailing child tagged with `org-archive-tag'."
   :type 'integer
   :group 'orgx-capture-shell)
 
+(defcustom orgx-capture-shell-show-welcome nil
+  "When non-nil, display welcome banner when initializing `orgx-capture-shell'."
+  :type 'boolean
+  :group 'orgx-capture-shell)
+
+(defcustom orgx-capture-shell-hide-slash-commands nil
+  "When non-nil, hide slash command completion and disallow slash command execution.
+Users can access commands via `orgx-capture-shell-transient' or `orgx-capture-shell-command-menu'."
+  :type 'boolean
+  :group 'orgx-capture-shell)
+
 (defcustom orgx-capture-shell-enable-flyspell t
   "When non-nil, enable `flyspell-mode' in `orgx-capture-shell-mode'."
   :type 'boolean
@@ -691,44 +702,70 @@ STATUS is `ready', `success', or `error'; it defaults to `ready'."
          (file-name (if orgx-capture-shell-current-file
                         (file-name-nondirectory orgx-capture-shell-current-file)
                       "none"))
-         (headline orgx-capture-shell-current-headline))
-    (format "%s [%s%s · %s] ❯ " indicator file-name
-            (if (and headline (not (string-empty-p headline)))
-                (format " : %s" headline)
-              "")
-            orgx-capture-shell-current-template)))
+         (headline orgx-capture-shell-current-headline)
+         (prompt (format "%s [%s%s · %s] ❯ " indicator file-name
+                         (if (and headline (not (string-empty-p headline)))
+                             (format " : %s" headline)
+                           "")
+                         orgx-capture-shell-current-template)))
+    (propertize prompt
+                'read-only t
+                'front-sticky '(read-only)
+                'rear-nonsticky '(read-only face))))
 
 (defun orgx-capture-shell--execute-slash-command (cmd-line)
   "Execute a slash command CMD-LINE (e.g. \"/target foo.org:Tasks\")."
-  (let* ((parts (split-string (string-remove-prefix "/" cmd-line) "[ \t]+" t))
-         (verb (downcase (or (car parts) "")))
-         (args (string-join (cdr parts) " ")))
-    (pcase verb
+  (if orgx-capture-shell-hide-slash-commands
+      (progn
+        (when orgx-capture-shell--status (setq orgx-capture-shell--status 'error))
+        "Slash commands are disabled (use transient menu 'C-c m' or command menu 'C-c C-o').")
+    (let* ((parts (split-string (string-remove-prefix "/" cmd-line) "[ \t]+" t))
+           (verb (downcase (or (car parts) "")))
+           (args (string-join (cdr parts) " ")))
+      (pcase verb
       ((or "target" "t")
-       (if (string-empty-p args)
+       (if (string-empty-p (string-trim args))
            (format "Current target: %s [%s]"
                    (or orgx-capture-shell-current-file "none")
                    (or orgx-capture-shell-current-headline "none"))
          (let* ((colon (string-search ":" args))
-                (f (if colon (substring args 0 colon) args))
-                (h (and colon (substring args (1+ colon)))))
-           (setq orgx-capture-shell-current-file (expand-file-name f))
-           (when (and h (not (string-empty-p h)))
-             (setq orgx-capture-shell-current-headline h))
-           (format "Target set to %s [%s]"
-                   (file-name-nondirectory orgx-capture-shell-current-file)
-                   (or orgx-capture-shell-current-headline "none")))))
+                (f (string-trim (if colon (substring args 0 colon) args)))
+                (h (and colon (string-trim (substring args (1+ colon)))))
+                (exp (expand-file-name f)))
+           (cond
+            ((string-empty-p f)
+             (when orgx-capture-shell--status (setq orgx-capture-shell--status 'error))
+             "Error: Target file cannot be empty")
+            ((not (file-exists-p exp))
+             (when orgx-capture-shell--status (setq orgx-capture-shell--status 'error))
+             (format "Error: Target file does not exist: %s" f))
+            ((file-directory-p exp)
+             (when orgx-capture-shell--status (setq orgx-capture-shell--status 'error))
+             (format "Error: Target cannot be a directory: %s" f))
+            ((not (string-suffix-p ".org" exp))
+             (when orgx-capture-shell--status (setq orgx-capture-shell--status 'error))
+             (format "Error: Target file must be an Org file (.org): %s" f))
+            (t
+             (setq orgx-capture-shell-current-file exp)
+             (when (and h (not (string-empty-p h)))
+               (setq orgx-capture-shell-current-headline h))
+             (format "Target set to %s [%s]"
+                     (file-name-nondirectory orgx-capture-shell-current-file)
+                     (or orgx-capture-shell-current-headline "none")))))))
       ((or "template" "tpl")
-       (if (string-empty-p args)
-           (format "Current template: %s" orgx-capture-shell-current-template)
-         (let ((sym (intern (downcase args))))
-           (if (memq sym orgx-capture-shell-templates)
-               (progn
-                 (setq orgx-capture-shell-current-template sym)
-                 (format "Template switched to: %s" sym))
-             (when orgx-capture-shell--status
-               (setq orgx-capture-shell--status 'error))
-             (format "Unknown template: %s (choose task, note, journal, plain)" args)))))
+       (let ((trimmed (string-trim args)))
+         (if (string-empty-p trimmed)
+             (format "Current template: %s" orgx-capture-shell-current-template)
+           (let ((sym (intern (downcase trimmed))))
+             (if (memq sym orgx-capture-shell-templates)
+                 (progn
+                   (setq orgx-capture-shell-current-template sym)
+                   (format "Template switched to: %s" sym))
+               (when orgx-capture-shell--status
+                 (setq orgx-capture-shell--status 'error))
+               (format "Unknown template: %s (choose %s)"
+                       trimmed
+                       (mapconcat #'symbol-name orgx-capture-shell-templates ", ")))))))
       ("form"
        (orgx-capture-shell--run-form args))
       ("denote"
@@ -771,7 +808,7 @@ STATUS is `ready', `success', or `error'; it defaults to `ready'."
       (_
        (when orgx-capture-shell--status
          (setq orgx-capture-shell--status 'error))
-       (format "Unknown command: /%s (type /help for available commands)" verb)))))
+       (format "Unknown command: /%s (type /help for available commands)" verb))))))
 
 ;;; Comint input filter and handler
 
@@ -805,7 +842,12 @@ Use C-j to insert a literal newline before submitting with RET."
           (condition-case err
               (cond
                ((string-prefix-p "/" trimmed)
-		(orgx-capture-shell--execute-slash-command trimmed))
+                (if orgx-capture-shell-hide-slash-commands
+                    (progn
+                      (when orgx-capture-shell--status
+                        (setq orgx-capture-shell--status 'error))
+                      "Slash commands are disabled (use transient menu 'C-c m' or command menu 'C-c C-o').")
+                  (orgx-capture-shell--execute-slash-command trimmed)))
                ((or force (and (not (string-empty-p trimmed))
                                (orgx-capture-shell--form-triggered-p trimmed)))
 		(orgx-capture-shell--run-form
@@ -855,36 +897,80 @@ Use C-j to insert a literal newline before submitting with RET."
 (defun orgx-capture-shell-completion-at-point ()
   "Completion at point function for orgx-capture-shell slash commands.
 Completes command names, `/template' names, and `/target' files and headlines."
-  (let* ((start (orgx-capture-shell--input-start))
-         (line (buffer-substring-no-properties start (point))))
-    (cond
-     ((string-match "\\`/\\S-*\\'" line)
-      (list start (point) orgx-capture-shell-commands :exclusive 'no))
-     ((string-match "\\`/\\(?:template\\|tpl\\)[ \t]+\\(\\S-*\\)\\'" line)
-      (list (+ start (match-beginning 1)) (point)
-            (mapcar #'symbol-name orgx-capture-shell-templates)
-            :exclusive 'no))
-     ((string-match "\\`/\\(?:target\\|t\\)[ \t]+\\(.*\\)\\'" line)
-      (let* ((arg (match-string 1 line))
-             (arg-start (+ start (match-beginning 1)))
-             (colon (string-search ":" arg)))
-        (if colon
-            (list (+ arg-start colon 1) (point)
-                  (orgx-capture-shell--headline-paths
-                   (expand-file-name (substring arg 0 colon)))
-                  :exclusive 'no)
-          (list arg-start (point) #'completion-file-name-table
-                :exclusive 'no)))))))
+  (unless orgx-capture-shell-hide-slash-commands
+    (let* ((start (orgx-capture-shell--input-start))
+           (line (buffer-substring-no-properties start (point))))
+      (cond
+       ((string-match "\\`/\\S-*\\'" line)
+        (list start (point) orgx-capture-shell-commands :exclusive 'no))
+       ((string-match "\\`/\\(?:template\\|tpl\\)[ \t]+\\(\\S-*\\)\\'" line)
+        (list (+ start (match-beginning 1)) (point)
+              (mapcar #'symbol-name orgx-capture-shell-templates)
+              :exclusive 'no))
+       ((string-match "\\`/\\(?:target\\|t\\)[ \t]+\\(.*\\)\\'" line)
+        (let* ((arg (match-string 1 line))
+               (arg-start (+ start (match-beginning 1)))
+               (colon (string-search ":" arg)))
+          (if colon
+              (list (+ arg-start colon 1) (point)
+                    (orgx-capture-shell--headline-paths
+                     (expand-file-name (substring arg 0 colon)))
+                    :exclusive 'no)
+            (list arg-start (point) #'completion-file-name-table
+                  :exclusive 'no))))))))
 
 ;;; Major Mode Definition
+
+(declare-function annotated-completing-read "annotated-completing-read")
+
+(defun orgx-capture-shell-command-menu ()
+  "Prompt for an action using `annotated-completing-read' or transient."
+  (interactive)
+  (let* ((actions
+          '(("Transient Menu"  . ("Open full interactive transient menu" . transient))
+            ("Set Target File" . ("Select target Org file and headline" . target))
+            ("Set Template"    . ("Select capture template type" . template))
+            ("Set Denote"      . ("Pick a denote note as capture target" . denote))
+            ("Capture Form"    . ("Open multi-field capture form" . form))
+            ("Undo Capture"    . ("Undo last capture" . undo))
+            ("Recent Captures" . ("Display recent captures" . recent))
+            ("Clear Buffer"    . ("Clear shell buffer" . clear))))
+         (table (mapcar (lambda (a) (cons (car a) (cadr a))) actions))
+         (choice (if (fboundp 'annotated-completing-read)
+                     (annotated-completing-read table :prompt "Shell command: " :require-match t)
+                   (completing-read "Shell command: " (mapcar #'car actions) nil t)))
+         (action (when choice (cddr (assoc choice actions)))))
+    (pcase action
+      ('transient (orgx-capture-shell-transient))
+      ('target (call-interactively #'orgx-capture-shell-set-target-file))
+      ('template (call-interactively #'orgx-capture-shell-set-template))
+      ('denote (call-interactively #'orgx-capture-shell-set-denote-target))
+      ('form (call-interactively #'orgx-capture-shell-form))
+      ('undo (call-interactively #'orgx-capture-shell-undo-command))
+      ('recent (message "%s" (orgx-capture-shell--recent-list)))
+      ('clear (let ((inhibit-read-only t))
+                (erase-buffer)
+                (comint-output-filter (get-buffer-process (current-buffer))
+                                      (orgx-capture-shell--prompt-string)))))))
+
+(defun orgx-capture-shell-slash ()
+  "Self-insert `/' or open command menu if slash commands are hidden at prompt start."
+  (interactive)
+  (if (and orgx-capture-shell-hide-slash-commands
+           (= (point) (orgx-capture-shell--input-start)))
+      (orgx-capture-shell-command-menu)
+    (self-insert-command 1 ?/)))
 
 (defvar-keymap orgx-capture-shell-mode-map
   :doc "Keymap for `orgx-capture-shell-mode'."
   :parent comint-mode-map
   "C-c C-u" #'orgx-capture-shell--undo-last
   "C-c C-k" #'comint-kill-input
+  "C-c C-o" #'orgx-capture-shell-command-menu
+  "C-c m"   #'orgx-capture-shell-transient
   "C-j" #'newline
-  "C-<return>" #'orgx-capture-shell-send-form)
+  "C-<return>" #'orgx-capture-shell-send-form
+  "/" #'orgx-capture-shell-slash)
 
 (defun orgx-capture-shell--flyspell-verify ()
   "Verification predicate for `flyspell-mode' in `orgx-capture-shell-mode'.
@@ -906,6 +992,7 @@ Ignores prompts, slash commands, and short syntax."
 \\{orgx-capture-shell-mode-map}"
   (setq comint-prompt-regexp orgx-capture-shell--prompt-regexp)
   (setq comint-use-prompt-regexp t)
+  (setq-local comint-prompt-read-only t)
   (setq comint-input-sender #'orgx-capture-shell-input-sender)
   (setq-local fill-column 80)
   (visual-line-mode 1)
@@ -951,7 +1038,8 @@ Ignores prompts, slash commands, and short syntax."
       (when (= (point-min) (point-max))
         (comint-output-filter
          (get-buffer-process buf)
-         (concat "Orgx Capture Shell (type /help for commands)\n"
+         (concat (when orgx-capture-shell-show-welcome
+                   "Orgx Capture Shell (type /help for commands)\n")
                  (orgx-capture-shell--prompt-string)))))
     (pop-to-buffer buf)
     buf))
@@ -973,19 +1061,42 @@ window.  If it is hidden or not active, display it in the bottom popup window."
 
 (defun orgx-capture-shell-set-target-file (file &optional headline)
   "Set the capture target to FILE and optional HEADLINE."
-  (interactive "fOrg file: \nsHeadline (optional): ")
-  (setq orgx-capture-shell-current-file (expand-file-name file))
-  (setq orgx-capture-shell-current-headline (and (not (string-empty-p headline)) headline))
-  (message "Target set to %s%s"
-           (file-name-nondirectory orgx-capture-shell-current-file)
-           (if orgx-capture-shell-current-headline
-               (format ":%s" orgx-capture-shell-current-headline)
-             "")))
+  (interactive
+   (let* ((f (read-file-name "Org file: " nil nil t nil
+                             (lambda (name)
+                               (or (file-directory-p name)
+                                   (string-suffix-p ".org" name)))))
+          (h (completing-read "Headline (optional): "
+                              (when (and f (file-regular-p f))
+                                (orgx-capture-shell--headline-paths f))
+                              nil nil)))
+     (list f h)))
+  (unless (and file (stringp file) (not (string-empty-p (string-trim file))))
+    (user-error "Target file must be specified"))
+  (let ((exp (expand-file-name file)))
+    (unless (file-exists-p exp)
+      (user-error "Target file does not exist: %s" exp))
+    (when (file-directory-p exp)
+      (user-error "Target file cannot be a directory: %s" exp))
+    (unless (string-suffix-p ".org" exp)
+      (user-error "Target file must be an Org file (.org): %s" exp))
+    (setq orgx-capture-shell-current-file exp)
+    (setq orgx-capture-shell-current-headline
+          (and headline (not (string-empty-p (string-trim headline))) headline))
+    (message "Target set to %s%s"
+             (file-name-nondirectory orgx-capture-shell-current-file)
+             (if orgx-capture-shell-current-headline
+                 (format ":%s" orgx-capture-shell-current-headline)
+               ""))))
 
 (defun orgx-capture-shell-set-template (template)
   "Set the active capture TEMPLATE."
   (interactive
    (list (intern (completing-read "Template: " (mapcar #'symbol-name orgx-capture-shell-templates) nil t))))
+  (unless (memq template orgx-capture-shell-templates)
+    (user-error "Invalid template: %s (choose %s)"
+                template
+                (mapconcat #'symbol-name orgx-capture-shell-templates ", ")))
   (setq orgx-capture-shell-current-template template)
   (message "Template set to %s" template))
 
