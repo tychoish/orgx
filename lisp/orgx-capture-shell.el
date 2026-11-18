@@ -133,8 +133,9 @@ never lands after a trailing child tagged with `org-archive-tag'."
   :group 'orgx-capture-shell)
 
 (defcustom orgx-capture-shell-hide-slash-commands nil
-  "When non-nil, hide slash command completion and disallow slash command execution.
-Users can access commands via `orgx-capture-shell-transient' or `orgx-capture-shell-command-menu'."
+  "When non-nil, hide slash command completion and disallow execution.
+Users can access commands via `orgx-capture-shell-transient'
+or `orgx-capture-shell-command-menu'."
   :type 'boolean
   :group 'orgx-capture-shell)
 
@@ -530,7 +531,8 @@ Returns a message string."
        (setq orgx-capture-shell--form-origin
              (and (derived-mode-p 'orgx-capture-shell-mode) (current-buffer)))
        (setq orgx-capture-shell--form (plist-put (copy-sequence defaults) :title (or initial "")))
-       (orgx-capture-shell-form-transient)
+       (with-suppressed-warnings ((interactive-only orgx-capture-shell-form-transient))
+         (orgx-capture-shell-form-transient))
        "Capture form opened.")
       (_
        (condition-case nil
@@ -941,7 +943,9 @@ Completes command names, `/template' names, and `/target' files and headlines."
                    (completing-read "Shell command: " (mapcar #'car actions) nil t)))
          (action (when choice (cddr (assoc choice actions)))))
     (pcase action
-      ('transient (orgx-capture-shell-transient))
+      ('transient
+       (with-suppressed-warnings ((interactive-only orgx-capture-shell-transient))
+         (orgx-capture-shell-transient)))
       ('target (call-interactively #'orgx-capture-shell-set-target-file))
       ('template (call-interactively #'orgx-capture-shell-set-template))
       ('denote (call-interactively #'orgx-capture-shell-set-denote-target))
@@ -954,7 +958,8 @@ Completes command names, `/template' names, and `/target' files and headlines."
                                       (orgx-capture-shell--prompt-string)))))))
 
 (defun orgx-capture-shell-slash ()
-  "Self-insert `/' or open command menu if slash commands are hidden at prompt start."
+  "Self-insert `/' or open command menu if slash commands are hidden.
+Only triggers command menu when point is at prompt start."
   (interactive)
   (if (and orgx-capture-shell-hide-slash-commands
            (= (point) (orgx-capture-shell--input-start)))
