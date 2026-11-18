@@ -31,6 +31,7 @@
 (require 'map)
 (require 'seq)
 (require 'subr-x)
+(require 'logx)
 (require 'org-capture)
 (require 'mcpkit)
 (require 'hitl-plan)
@@ -241,6 +242,11 @@ buffer is displayed without taking focus."
         (let ((buf (orgx-bulk-review plan nil)))
           (when (bufferp buf)
             (display-buffer buf '(nil (inhibit-same-window . t)))
+            (logx-info :cat 'orgx
+                       :msg (format "Plan %s awaits review in %s"
+                                    (hitl-plan-id plan) (buffer-name buf))
+                       :plan_id (hitl-plan-id plan)
+                       :buffer (buffer-name buf))
             (message "orgx: plan %s awaits your review in %s"
                      (hitl-plan-id plan) (buffer-name buf)))))
       result)))
