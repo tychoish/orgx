@@ -372,6 +372,8 @@ they are the top-level headings of the buffer."
                          (if (org-at-heading-p) t (outline-next-heading)))))
         (while (and continue (< (point) end))
           (when (= (org-current-level) level)
+            (when-let* ((prop-id (org-entry-get (point) "DENOTE_ID")))
+              (push prop-id ids))
             (let* ((title (org-get-heading t t t t))
                    (links (org-element-map
                               (org-element-parse-secondary-string title '(link))
@@ -382,7 +384,33 @@ they are the top-level headings of the buffer."
                   (when (string-match "\\(?:denote:\\)?\\([0-9]\\{8\\}T[0-9]\\{6\\}\\)" raw)
                     (push (match-string 1 raw) ids))))))
           (setq continue (outline-next-heading)))
-        (nreverse ids)))))
+        (delete-dups (nreverse ids))))))
+
+(defun orgx-denote--existing-done-or-archived-ids ()
+  "Return denote IDs of any headings in current buffer that are DONE or archived."
+  (save-excursion
+    (save-restriction
+      (widen)
+      (goto-char (point-min))
+      (let ((ids nil)
+            (done-kws (or (bound-and-true-p org-done-keywords) '("DONE" "CANCELLED"))))
+        (while (not (eobp))
+          (when (org-at-heading-p)
+            (let* ((done-p (or (org-entry-is-done-p)
+                               (member (org-get-todo-state) done-kws)))
+                   (archived-p (or (and (fboundp 'org-in-archived-heading-p)
+                                        (org-in-archived-heading-p))
+                                   (member org-archive-tag (org-get-tags))))
+                   (id (org-entry-get (point) "DENOTE_ID")))
+              (unless id
+                (let ((title (org-get-heading t t t t)))
+                  (when (and title (string-match "\\(?:denote:\\)?\\([0-9]\\{8\\}T[0-9]\\{6\\}\\)" title))
+                    (setq id (match-string 1 title)))))
+              (when (and id (or done-p archived-p))
+                (push id ids))))
+          (unless (outline-next-heading)
+            (goto-char (point-max))))
+        (delete-dups (nreverse ids))))))
 
 (defun orgx-denote--target-marker (target)
   "Return a marker at the heading of refile TARGET, or at the start of its file."
@@ -416,15 +444,17 @@ Notes in LINKED are dropped, kept, or chosen per `orgx-denote-capture-dedupe'."
 
 (defun orgx-denote--link-headings (files)
   "Return org text with one top-level `denote:' link heading per file in FILES.
-Brackets are stripped from titles and `%' is escaped for `org-capture'."
+Brackets are stripped from titles and `%' is escaped for `org-capture'.
+Sets the DENOTE_ID property for idempotency."
   (string-join
    (seq-map (lambda (file)
-              (format "* [[denote:%s][%s]]"
-                      (orgx-denote--file-id file)
-                      (thread-last
-                        (orgx-denote--file-title file)
-                        (replace-regexp-in-string "[][]" "")
-                        (replace-regexp-in-string "%" "\\\\%"))))
+              (let ((id (orgx-denote--file-id file))
+                    (title (thread-last
+                             (orgx-denote--file-title file)
+                             (replace-regexp-in-string "[][]" "")
+                             (replace-regexp-in-string "%" "\\\\%"))))
+                (format "* [[denote:%s][%s]]\n:PROPERTIES:\n:DENOTE_ID: %s\n:END:"
+                        id title id)))
             files)
    "\n"))
 
@@ -454,14 +484,22 @@ in an `org-capture' buffer under the target."
       (user-error "No notes with open items matching %s" (string-join keywords ", ")))
     (let* ((marker (orgx-denote--target-marker
                     (org-refile-get-location "Capture open denote items under")))
+           (target-buf (marker-buffer marker))
+           (done-or-archived-ids
+            (with-current-buffer target-buf
+              (orgx-denote--existing-done-or-archived-ids)))
+           (active-files (seq-remove (lambda (file)
+                                       (member (orgx-denote--file-id file)
+                                               done-or-archived-ids))
+                                     open-files))
            (kept (orgx-denote--unlinked-files
-                  open-files
-                  (with-current-buffer (marker-buffer marker)
+                  active-files
+                  (with-current-buffer target-buf
                     (save-excursion
                       (goto-char marker)
                       (orgx-denote--peer-linked-ids))))))
       (when (null kept)
-        (user-error "Every matching note is already linked under the target"))
+        (user-error "Every matching note is already linked or done/archived under the target"))
       (let ((org-capture-templates
              `(("o" "denote open items" entry
                 (function ,(lambda ()

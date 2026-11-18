@@ -230,11 +230,11 @@ it is paired with)."
                      (setq captured (nth 4 (car org-capture-templates))))))
           (let ((orgx-denote-capture-dedupe 'skip))
             (orgx-denote-capture-open-items (list open linked closed)))
-          (should (equal "* [[denote:20261101T100000][Open]]" captured))
+          (should (equal "* [[denote:20261101T100000][Open]]\n:PROPERTIES:\n:DENOTE_ID: 20261101T100000\n:END:" captured))
           (let ((orgx-denote-capture-dedupe 'include))
             (orgx-denote-capture-open-items (list open linked closed)))
-          (should (equal (concat "* [[denote:20261101T100000][Open]]\n"
-                                 "* [[denote:20261101T110000][Linked]]")
+          (should (equal (concat "* [[denote:20261101T100000][Open]]\n:PROPERTIES:\n:DENOTE_ID: 20261101T100000\n:END:\n"
+                                 "* [[denote:20261101T110000][Linked]]\n:PROPERTIES:\n:DENOTE_ID: 20261101T110000\n:END:")
                          captured)))
       (when (get-file-buffer target)
         (kill-buffer (get-file-buffer target)))
@@ -304,7 +304,7 @@ it is paired with)."
          (a (orgx-denote-test--write dir "20261101T100000--a.org" "#+title: A [x] 100%\n"))
          (b (orgx-denote-test--write dir "20261101T110000--b.org" "#+title: B\n")))
     (unwind-protect
-        (should (equal "* [[denote:20261101T100000][A x 100\\%]]\n* [[denote:20261101T110000][B]]"
+        (should (equal "* [[denote:20261101T100000][A x 100\\%]]\n:PROPERTIES:\n:DENOTE_ID: 20261101T100000\n:END:\n* [[denote:20261101T110000][B]]\n:PROPERTIES:\n:DENOTE_ID: 20261101T110000\n:END:"
                        (orgx-denote--link-headings (list a b))))
       (delete-directory dir t))))
 
@@ -335,11 +335,11 @@ it is paired with)."
           ;; Keyword prompt names WAIT, so the home note qualifies.
           (setq answers (list '("home") '("WAIT")))
           (orgx-denote-capture-open-items)
-          (should (equal "* [[denote:20261101T110000][Home]]" captured))
+          (should (equal "* [[denote:20261101T110000][Home]]\n:PROPERTIES:\n:DENOTE_ID: 20261101T110000\n:END:" captured))
           ;; Explicit files skip the tag prompt, so only the keyword answer is consumed.
           (setq answers (list '("TODO")))
           (orgx-denote-capture-open-items (list work home))
-          (should (equal "* [[denote:20261101T100000][Work]]" captured))
+          (should (equal "* [[denote:20261101T100000][Work]]\n:PROPERTIES:\n:DENOTE_ID: 20261101T100000\n:END:" captured))
           ;; Everything already linked under the target is a user-error.
           (with-current-buffer (find-file-noselect target)
             (goto-char (point-max))
@@ -347,6 +347,42 @@ it is paired with)."
           (setq answers (list '("TODO")))
           (let ((orgx-denote-capture-dedupe 'skip))
             (should-error (orgx-denote-capture-open-items (list work)) :type 'user-error)))
+      (when (get-file-buffer target)
+        (with-current-buffer (get-file-buffer target)
+          (set-buffer-modified-p nil))
+        (kill-buffer (get-file-buffer target)))
+      (delete-directory dir t))))
+
+(ert-deftest orgx-denote-capture-idempotency-done-or-archived-test ()
+  "Notes with existing DONE or archived tasks in the target buffer are skipped."
+  (let* ((dir (make-temp-file "orgx-denote-cap" t))
+         (done-note (orgx-denote-test--write dir "20261101T100000--done__work.org" "#+title: Done Note\n* TODO a\n"))
+         (archived-note (orgx-denote-test--write dir "20261101T120000--archived__work.org" "#+title: Archived Note\n* TODO b\n"))
+         (open-note (orgx-denote-test--write dir "20261101T140000--open__work.org" "#+title: Open Note\n* TODO c\n"))
+         (target (orgx-denote-test--write dir "target.org"
+                                          "* Inbox\n** DONE Existing Task\n:PROPERTIES:\n:DENOTE_ID: 20261101T100000\n:END:\n* Archive :ARCHIVE:\n** Old Task [[denote:20261101T120000][Archived Note]]\n"))
+         (answers nil)
+         (captured nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'denote-retrieve-filename-keywords-as-list)
+                   (lambda (file)
+                     (when (string-match "__\\([a-z_]+\\)\\.org\\'" file)
+                       (split-string (match-string 1 file) "_"))))
+                  ((symbol-function 'completing-read-multiple)
+                   (lambda (&rest _) (pop answers)))
+                  ((symbol-function 'org-refile-get-location)
+                   (lambda (&rest _) (list "Inbox" target nil 1)))
+                  ((symbol-function 'org-capture)
+                   (lambda (&rest _)
+                     (setq captured (nth 4 (car org-capture-templates))))))
+          (setq answers (list '("TODO")))
+          ;; When capturing all 3 notes, done-note and archived-note should be skipped
+          (orgx-denote-capture-open-items (list done-note archived-note open-note))
+          (should (equal "* [[denote:20261101T140000][Open Note]]\n:PROPERTIES:\n:DENOTE_ID: 20261101T140000\n:END:" captured))
+          ;; If only done and archived notes are candidates, user-error is raised
+          (setq answers (list '("TODO")))
+          (should-error (orgx-denote-capture-open-items (list done-note archived-note))
+                        :type 'user-error))
       (when (get-file-buffer target)
         (with-current-buffer (get-file-buffer target)
           (set-buffer-modified-p nil))
