@@ -353,5 +353,23 @@ it is paired with)."
         (kill-buffer (get-file-buffer target)))
       (delete-directory dir t))))
 
+(ert-deftest orgx-denote-agenda-category-test ()
+  "Agenda category returns truncated/padded signature without symbolp error."
+  (let ((orgx-denote-agenda-category-width 8))
+    (cl-letf (((symbol-function 'denote-retrieve-filename-signature)
+               (lambda (f)
+                 (cond ((string-match-p "long" f) "1a2b3c4d5e")
+                       ((string-match-p "short" f) "1a2")
+                       (t nil)))))
+      (with-temp-buffer
+        (setq buffer-file-name "/tmp/short.org")
+        (should (equal "1a2     " (orgx-denote-agenda-category))))
+      (with-temp-buffer
+        (setq buffer-file-name "/tmp/long.org")
+        (should (equal "1a2b3c4…" (orgx-denote-agenda-category))))
+      (with-temp-buffer
+        (setq buffer-file-name nil)
+        (should (equal "        " (orgx-denote-agenda-category)))))))
+
 (provide 'orgx-denote-test)
 ;;; orgx-denote-test.el ends here

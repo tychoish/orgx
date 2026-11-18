@@ -159,7 +159,7 @@ excludes completed notes."
   (let* ((file (buffer-file-name))
          (seq (or (and file (fboundp 'denote-retrieve-filename-signature)
                        (denote-retrieve-filename-signature file)) "")))
-    (string-pad (string-limit seq orgx-denote-agenda-category-width nil "…")
+    (string-pad (truncate-string-to-width seq orgx-denote-agenda-category-width nil nil "…")
                 orgx-denote-agenda-category-width)))
 
 (defun orgx-denote-agenda-cmp-signature (a b)
