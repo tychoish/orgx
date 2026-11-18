@@ -221,9 +221,9 @@ signature, and formats the sequence category."
 (cl-defun orgx-denote-warm-buffers-and-run (files on-done &key label
                                                   (chunk-size orgx-denote-agenda-warm-chunk-size)
                                                   (delay orgx-denote-agenda-warm-delay))
-  "Warm unvisited FILES in yielding batches using `gen-mapc-async', then call ON-DONE.
-If all FILES are already open in buffers (or in noninteractive batch mode),
-calls ON-DONE immediately."
+  "Warm unvisited FILES in yielding batches, then call ON-DONE.
+Batches run through `gen-mapc-async'.  If all FILES are already open in
+buffers (or in noninteractive batch mode), calls ON-DONE immediately."
   (let* ((all (seq-filter #'stringp (mapcar #'expand-file-name files)))
          (cold (seq-filter (lambda (f) (not (get-file-buffer f))) all)))
     (if (or noninteractive (null cold))
@@ -251,10 +251,8 @@ calls ON-DONE immediately."
         (letrec ((rem cold)
                  (total (length cold))
                  (done-count 0)
-                 (timer nil)
                  (step
                   (lambda ()
-                    (setq timer nil)
                     (let ((count 0)
                           (limit (max 1 (or chunk-size 5))))
                       (while (and rem (< count limit))
@@ -267,8 +265,8 @@ calls ON-DONE immediately."
                           (progn
                             (message "Denote files ready. Rendering %s..." (or label "agenda"))
                             (when on-done (funcall on-done)))
-                        (setq timer (run-with-idle-timer (or delay 0.02) nil step)))))))
-          (setq timer (run-with-idle-timer (or delay 0.02) nil step)))))))
+                        (run-with-idle-timer (or delay 0.02) nil step))))))
+          (run-with-idle-timer (or delay 0.02) nil step))))))
 
 ;;;###autoload
 (defun orgx-denote-agenda-todos ()
