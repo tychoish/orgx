@@ -241,7 +241,8 @@ signature, and formats the sequence category."
                                                   (delay orgx-denote-agenda-warm-delay))
   "Warm unvisited FILES in yielding batches, then call ON-DONE.
 Batches run through `gen-mapc-async'.  If all FILES are already open in
-buffers in `org-mode' (or in noninteractive batch mode), calls ON-DONE immediately."
+buffers in `org-mode' (or in noninteractive batch mode), calls ON-DONE
+immediately."
   (let* ((all (seq-filter #'stringp (mapcar #'expand-file-name files)))
          (cold (seq-filter (lambda (f) (not (orgx-denote--file-warmed-p f))) all)))
     (if (or noninteractive (null cold))
