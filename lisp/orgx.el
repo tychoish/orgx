@@ -225,7 +225,10 @@ Updates `local-notes-directory', `org-directory',
   (when (boundp 'org-agenda-files)
     (seq-do (lambda (f)
               (when (file-exists-p f)
-                (find-file-noselect f)))
+                (when-let* ((buf (find-file-noselect f)))
+                  (with-current-buffer buf
+                    (unless (derived-mode-p 'org-mode)
+                      (org-mode))))))
             (org-agenda-files))))
 
 ;;;###autoload
@@ -238,6 +241,24 @@ Updates `local-notes-directory', `org-directory',
                 (with-current-buffer buf
                   (revert-buffer :ignore-auto :noconfirm))))
             (org-agenda-files))))
+
+(defun orgx--ensure-agenda-file-buffer-mode (buf)
+  "Ensure buffer BUF returned by `org-get-agenda-file-buffer' is in `org-mode'."
+  (when (and (buffer-live-p buf)
+             (when-let* ((file (buffer-file-name buf)))
+               (string-match-p "\\.org\\'" file))
+             (not (derived-mode-p 'org-mode)))
+    (let ((enable-local-variables (if (and (fboundp 'hitl-plan-restricted-p)
+                                           (hitl-plan-restricted-p))
+                                      nil
+                                    enable-local-variables))
+          (enable-dir-local-variables (if (and (fboundp 'hitl-plan-restricted-p)
+                                               (hitl-plan-restricted-p))
+                                          nil
+                                        enable-dir-local-variables)))
+      (with-current-buffer buf
+        (org-mode))))
+  buf)
 
 (defun orgx--ad-org-agenda-redo (orig-fun &rest args)
   "Advice to background-revert buffers before re-running agenda view."
@@ -1166,6 +1187,7 @@ Activates `orgx-command-map' under C-c o."
   (advice-add 'org-agenda-goto-mouse :around #'orgx--ad-org-agenda-goto-mouse)
   (advice-add 'org-link-open-as-file :around #'orgx-link-github-line-support)
   (advice-add 'org-table--shrink-field :filter-args #'orgx--ad-table-shrink-field)
+  (advice-add 'org-get-agenda-file-buffer :filter-return #'orgx--ensure-agenda-file-buffer-mode)
   (add-hook 'org-open-link-functions #'orgx-open-custom-id-slug-fallback)
   (orgx-refile-agent-enable))
 
@@ -1178,6 +1200,7 @@ Activates `orgx-command-map' under C-c o."
   (advice-remove 'org-agenda-goto-mouse #'orgx--ad-org-agenda-goto-mouse)
   (advice-remove 'org-link-open-as-file #'orgx-link-github-line-support)
   (advice-remove 'org-table--shrink-field #'orgx--ad-table-shrink-field)
+  (advice-remove 'org-get-agenda-file-buffer #'orgx--ensure-agenda-file-buffer-mode)
   (remove-hook 'org-open-link-functions #'orgx-open-custom-id-slug-fallback)
   (orgx-refile-agent-disable))
 

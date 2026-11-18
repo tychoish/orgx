@@ -95,10 +95,12 @@ execution_status/status of complete/executed/closed or tags :x:/:done:."
           (member "done" kws)
           (if-let* ((buf (get-file-buffer file)))
               (with-current-buffer buf
+                (unless (derived-mode-p 'org-mode)
+                  (org-mode))
                 (orgx-denote--buffer-completed-p))
             (with-temp-buffer
               (insert-file-contents file nil 0 1024)
-              (org-mode)
+              (delay-mode-hooks (org-mode))
               (orgx-denote--buffer-completed-p)))))))
 
 (defun orgx-denote--buffer-plan-p ()
@@ -124,10 +126,12 @@ execution_status/status of complete/executed/closed or tags :x:/:done:."
           (string-match-p "_tracker" base)
           (if-let* ((buf (get-file-buffer file)))
               (with-current-buffer buf
+                (unless (derived-mode-p 'org-mode)
+                  (org-mode))
                 (orgx-denote--buffer-plan-p))
             (with-temp-buffer
               (insert-file-contents file nil 0 1024)
-              (org-mode)
+              (delay-mode-hooks (org-mode))
               (orgx-denote--buffer-plan-p)))))))
 
 (defun orgx-denote-active-files ()
@@ -201,21 +205,35 @@ signature, and formats the sequence category."
   :type 'number
   :group 'orgx-denote)
 
+(defun orgx-denote--file-warmed-p (file)
+  "Return non-nil if FILE is visited in a live buffer derived from `org-mode'."
+  (when-let* ((buf (get-file-buffer file)))
+    (and (buffer-live-p buf)
+         (with-current-buffer buf
+           (derived-mode-p 'org-mode)))))
+
 (defun orgx-denote--visit-file (file)
   "Safely visit FILE in the background and bury its buffer."
   (when (and file (stringp file) (file-exists-p file))
-    (unless (get-file-buffer file)
-      (let ((enable-local-variables (if (and (fboundp 'hitl-plan-restricted-p)
-                                             (hitl-plan-restricted-p))
-                                        nil
-                                      enable-local-variables))
-            (enable-dir-local-variables (if (and (fboundp 'hitl-plan-restricted-p)
-                                                 (hitl-plan-restricted-p))
-                                            nil
-                                          enable-dir-local-variables)))
-        (when-let* ((buf (find-file-noselect file)))
-          (when (buffer-live-p buf)
-            (bury-buffer buf)))))))
+    (let ((buf (get-file-buffer file)))
+      (if (buffer-live-p buf)
+          (with-current-buffer buf
+            (unless (derived-mode-p 'org-mode)
+              (org-mode)))
+        (let ((enable-local-variables (if (and (fboundp 'hitl-plan-restricted-p)
+                                               (hitl-plan-restricted-p))
+                                          nil
+                                        enable-local-variables))
+              (enable-dir-local-variables (if (and (fboundp 'hitl-plan-restricted-p)
+                                                   (hitl-plan-restricted-p))
+                                              nil
+                                            enable-dir-local-variables)))
+          (when-let* ((new-buf (find-file-noselect file)))
+            (when (buffer-live-p new-buf)
+              (with-current-buffer new-buf
+                (unless (derived-mode-p 'org-mode)
+                  (org-mode)))
+              (bury-buffer new-buf))))))))
 
 ;;;###autoload
 (cl-defun orgx-denote-warm-buffers-and-run (files on-done &key label
@@ -223,9 +241,9 @@ signature, and formats the sequence category."
                                                   (delay orgx-denote-agenda-warm-delay))
   "Warm unvisited FILES in yielding batches, then call ON-DONE.
 Batches run through `gen-mapc-async'.  If all FILES are already open in
-buffers (or in noninteractive batch mode), calls ON-DONE immediately."
+buffers in `org-mode' (or in noninteractive batch mode), calls ON-DONE immediately."
   (let* ((all (seq-filter #'stringp (mapcar #'expand-file-name files)))
-         (cold (seq-filter (lambda (f) (not (get-file-buffer f))) all)))
+         (cold (seq-filter (lambda (f) (not (orgx-denote--file-warmed-p f))) all)))
     (if (or noninteractive (null cold))
         (progn
           (when (and noninteractive cold)
@@ -246,7 +264,13 @@ buffers (or in noninteractive batch mode), calls ON-DONE immediately."
                                    (or label "agenda") done total))
            :on-done (lambda ()
                       (message "Denote files ready. Rendering %s..." (or label "agenda"))
-                      (when on-done (funcall on-done))))
+                      (when on-done
+                        (condition-case err
+                            (funcall on-done)
+                          (error
+                           (message "Error rendering %s: %s"
+                                    (or label "agenda")
+                                    (error-message-string err)))))))
         ;; Fallback when gen.el is not loaded
         (letrec ((rem cold)
                  (total (length cold))
@@ -256,7 +280,7 @@ buffers (or in noninteractive batch mode), calls ON-DONE immediately."
                     (let ((count 0)
                           (limit (max 1 (or chunk-size 5))))
                       (while (and rem (< count limit))
-                        (orgx-denote--visit-file (pop rem))
+                        (ignore-errors (orgx-denote--visit-file (pop rem)))
                         (cl-incf count)
                         (cl-incf done-count))
                       (message "Warming Denote files for %s: %d/%d..."
@@ -264,9 +288,15 @@ buffers (or in noninteractive batch mode), calls ON-DONE immediately."
                       (if (null rem)
                           (progn
                             (message "Denote files ready. Rendering %s..." (or label "agenda"))
-                            (when on-done (funcall on-done)))
-                        (run-with-idle-timer (or delay 0.02) nil step))))))
-          (run-with-idle-timer (or delay 0.02) nil step))))))
+                            (when on-done
+                              (condition-case err
+                                  (funcall on-done)
+                                (error
+                                 (message "Error rendering %s: %s"
+                                          (or label "agenda")
+                                          (error-message-string err))))))
+                        (run-at-time (or delay 0.02) nil step))))))
+          (run-at-time (or delay 0.02) nil step))))))
 
 ;;;###autoload
 (defun orgx-denote-agenda-todos ()
@@ -394,7 +424,7 @@ buffers (or in noninteractive batch mode), calls ON-DONE immediately."
         (let* ((custom (assoc key-str (and (boundp 'org-agenda-custom-commands) org-agenda-custom-commands)))
                (files (and custom (orgx-denote--extract-command-files custom)))
                (cold (and (consp files)
-                          (seq-filter (lambda (f) (and (stringp f) (not (get-file-buffer f)))) files))))
+                          (seq-filter (lambda (f) (and (stringp f) (not (orgx-denote--file-warmed-p f)))) files))))
           (if cold
               (orgx-denote-warm-buffers-and-run
                files
@@ -404,6 +434,26 @@ buffers (or in noninteractive batch mode), calls ON-DONE immediately."
       (funcall orig-fn arg keys restriction))))
 
 (advice-add 'org-agenda :around #'orgx-denote--agenda-dispatcher-advice)
+
+(defun orgx-denote--ensure-agenda-file-buffer-mode (buf)
+  "Ensure buffer BUF returned by `org-get-agenda-file-buffer' is in `org-mode'."
+  (when (and (buffer-live-p buf)
+             (when-let* ((file (buffer-file-name buf)))
+               (string-match-p "\\.org\\'" file))
+             (not (derived-mode-p 'org-mode)))
+    (let ((enable-local-variables (if (and (fboundp 'hitl-plan-restricted-p)
+                                           (hitl-plan-restricted-p))
+                                      nil
+                                    enable-local-variables))
+          (enable-dir-local-variables (if (and (fboundp 'hitl-plan-restricted-p)
+                                               (hitl-plan-restricted-p))
+                                          nil
+                                        enable-dir-local-variables)))
+      (with-current-buffer buf
+        (org-mode))))
+  buf)
+
+(advice-add 'org-get-agenda-file-buffer :filter-return #'orgx-denote--ensure-agenda-file-buffer-mode)
 
 
 ;;; Capture template integration

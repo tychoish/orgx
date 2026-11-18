@@ -470,5 +470,44 @@ it is paired with)."
             (kill-buffer (get-file-buffer f1))))
       (delete-directory dir t))))
 
+(ert-deftest orgx-denote-warm-buffers-recovers-fundamental-mode-test ()
+  "A buffer open in fundamental-mode must be considered cold and warmed into org-mode."
+  (let ((dir (make-temp-file "orgx-denote-fund-" t)))
+    (unwind-protect
+        (let ((f1 (expand-file-name "20260101T000001==1a--one__note.org" dir))
+              (done nil))
+          (with-temp-file f1 (insert "#+title: One\n* TODO Task 1\n"))
+          (with-current-buffer (find-file-noselect f1)
+            (fundamental-mode)
+            (should (eq major-mode 'fundamental-mode)))
+          (should-not (orgx-denote--file-warmed-p f1))
+          (orgx-denote-warm-buffers-and-run
+           (list f1)
+           (lambda () (setq done t))
+           :label "fundamental-test")
+          (should done)
+          (let ((buf (get-file-buffer f1)))
+            (should buf)
+            (with-current-buffer buf
+              (should (derived-mode-p 'org-mode))))
+          (when (get-file-buffer f1) (kill-buffer (get-file-buffer f1))))
+      (delete-directory dir t))))
+
+(ert-deftest orgx-denote-ensure-agenda-file-buffer-mode-test ()
+  "org-get-agenda-file-buffer advice must ensure org-mode for .org files."
+  (let ((dir (make-temp-file "orgx-denote-agenda-buf-" t)))
+    (unwind-protect
+        (let ((f1 (expand-file-name "20260101T000001==1a--one__note.org" dir)))
+          (with-temp-file f1 (insert "#+title: One\n* TODO Task 1\n"))
+          (with-current-buffer (find-file-noselect f1)
+            (fundamental-mode)
+            (should (eq major-mode 'fundamental-mode)))
+          (let ((buf (org-get-agenda-file-buffer f1)))
+            (should buf)
+            (with-current-buffer buf
+              (should (derived-mode-p 'org-mode))))
+          (when (get-file-buffer f1) (kill-buffer (get-file-buffer f1))))
+      (delete-directory dir t))))
+
 (provide 'orgx-denote-test)
 ;;; orgx-denote-test.el ends here
