@@ -23,6 +23,7 @@
 (require 'orgx-bulk)
 
 (declare-function orgx-denote-files "orgx-denote")
+(declare-function orgx-denote-warm-buffers-and-run "orgx-denote")
 (declare-function orgx-bulk-review "orgx-bulk-buffer")
 (declare-function orgx-bulk--agenda-buffer-p "orgx-bulk")
 
@@ -300,6 +301,21 @@ Returns `(AGENDA-BUFFER . TARGETS)' and sets buffer-local
                          (concat " " (file-name-base (car files))))))
               (cons agenda-buf targets))))
       (setq org-agenda-bulk-marked-entries saved-global-marks))))
+
+;;;###autoload
+(cl-defun orgx-bulk-agenda-prepare-scope-async (scope on-done &key (chunk-size 5))
+  "Warm cold files in SCOPE in yielding batches, then call ON-DONE with SCOPE.
+When SCOPE has no cold files, calls ON-DONE immediately."
+  (let* ((files (orgx-bulk-agenda--scope-files scope))
+         (cold (and (consp files)
+                    (seq-filter (lambda (f) (and (stringp f) (not (get-file-buffer f)))) files))))
+    (if (and cold (fboundp 'orgx-denote-warm-buffers-and-run))
+        (orgx-denote-warm-buffers-and-run
+         cold
+         (lambda () (funcall on-done scope))
+         :label (format "bulk-scope:%s" (orgx-bulk-agenda--scope-type scope))
+         :chunk-size chunk-size)
+      (funcall on-done scope))))
 
 (defun orgx-bulk-batch-ensure-agenda (plan resolved-markers)
   "Ensure an agenda buffer for PLAN contains lines for RESOLVED-MARKERS.

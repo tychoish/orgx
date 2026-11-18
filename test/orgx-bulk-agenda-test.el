@@ -147,9 +147,6 @@
         (with-current-buffer (find-file-noselect f1)
           (should (equal (org-map-entries #'org-get-todo-state) '("DONE" "DONE"))))))))
 
-(provide 'orgx-bulk-agenda-test)
-;;; orgx-bulk-agenda-test.el ends here
-
 (ert-deftest orgx-bulk-agenda-scope-ignores-stale-sticky-buffer-test ()
   "A leftover empty sticky agenda buffer must not hide the scope's entries."
   (let ((f (make-temp-file "orgx-stale" nil ".org" "* TODO a\n* TODO b\n"))
@@ -180,3 +177,23 @@
           (with-current-buffer b (set-buffer-modified-p nil))
           (kill-buffer b)))
       (delete-file f))))
+
+(ert-deftest orgx-bulk-agenda-prepare-scope-async-test ()
+  "orgx-bulk-agenda-prepare-scope-async warms cold scope files and invokes callback."
+  (require 'orgx-denote)
+  (let ((f (make-temp-file "orgx-async-scope" nil ".org" "* TODO item\n"))
+        (called-scope nil))
+    (unwind-protect
+        (progn
+          (should-not (get-file-buffer f))
+          (orgx-bulk-agenda-prepare-scope-async
+           (list :type 'files :files (list f))
+           (lambda (s) (setq called-scope s)))
+          (should called-scope)
+          (should (get-file-buffer f)))
+      (when (get-file-buffer f)
+        (kill-buffer (get-file-buffer f)))
+      (delete-file f))))
+
+(provide 'orgx-bulk-agenda-test)
+;;; orgx-bulk-agenda-test.el ends here

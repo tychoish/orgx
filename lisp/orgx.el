@@ -539,7 +539,22 @@ file scope.  Candidates are grouped by file scope via
                  :group-name (lambda (candidate)
                                (when-let* ((e (cddr (assoc candidate acr-table))))
                                  (orgx--agenda-view-group e))))))
-    (org-agenda nil (car entry))))
+    (let* ((key (car entry))
+           (custom-entry (assoc key (and (boundp 'org-agenda-custom-commands) org-agenda-custom-commands)))
+           (settings (and custom-entry (orgx--agenda-view-settings custom-entry)))
+           (files-binding (assq 'org-agenda-files settings))
+           (files (when files-binding
+                    (condition-case nil
+                        (eval (cadr files-binding) t)
+                      (error nil)))))
+      (if (and (fboundp 'orgx-denote-warm-buffers-and-run)
+               (consp files)
+               (seq-some (lambda (f) (and (stringp f) (not (get-file-buffer f)))) files))
+          (orgx-denote-warm-buffers-and-run
+           files
+           (lambda () (org-agenda nil key))
+           :label (format "agenda:%s" key))
+        (org-agenda nil key)))))
 
 ;;; Heading search and navigation
 

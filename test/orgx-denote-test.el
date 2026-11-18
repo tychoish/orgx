@@ -407,5 +407,68 @@ it is paired with)."
         (setq buffer-file-name nil)
         (should (equal "        " (orgx-denote-agenda-category)))))))
 
+(ert-deftest orgx-denote-warm-buffers-and-run-batch-test ()
+  "Verify orgx-denote-warm-buffers-and-run visits cold files and runs on-done."
+  (let ((dir (make-temp-file "orgx-denote-warm-" t)))
+    (unwind-protect
+        (let ((f1 (expand-file-name "20260101T000001==1a--one__note.org" dir))
+              (f2 (expand-file-name "20260101T000002==1b--two__note.org" dir))
+              (done nil))
+          (with-temp-file f1 (insert "#+title: One\n* TODO Task 1\n"))
+          (with-temp-file f2 (insert "#+title: Two\n* TODO Task 2\n"))
+          (should-not (get-file-buffer f1))
+          (should-not (get-file-buffer f2))
+          (orgx-denote-warm-buffers-and-run
+           (list f1 f2)
+           (lambda () (setq done t))
+           :label "test-warm")
+          (should done)
+          (should (get-file-buffer f1))
+          (should (get-file-buffer f2))
+          (kill-buffer (get-file-buffer f1))
+          (kill-buffer (get-file-buffer f2)))
+      (delete-directory dir t))))
+
+(ert-deftest orgx-denote-warm-buffers-hot-fastpath-test ()
+  "When all files are already open, orgx-denote-warm-buffers-and-run invokes on-done synchronously."
+  (let ((dir (make-temp-file "orgx-denote-hot-" t)))
+    (unwind-protect
+        (let ((f1 (expand-file-name "20260101T000001==1a--one__note.org" dir))
+              (done nil)
+              (gen-called nil))
+          (with-temp-file f1 (insert "#+title: One\n"))
+          (find-file-noselect f1)
+          (let ((noninteractive nil))
+            (cl-letf (((symbol-function 'gen-mapc-async)
+                       (lambda (&rest _) (setq gen-called t))))
+              (orgx-denote-warm-buffers-and-run
+               (list f1)
+               (lambda () (setq done t))
+               :label "hot-test")))
+          (should done)
+          (should-not gen-called)
+          (when (get-file-buffer f1) (kill-buffer (get-file-buffer f1))))
+      (delete-directory dir t))))
+
+(ert-deftest orgx-denote-agenda-dispatcher-advice-test ()
+  "Verify org-agenda advice extracts and warms denote files before rendering."
+  (let ((dir (make-temp-file "orgx-denote-disp-" t)))
+    (unwind-protect
+        (let* ((f1 (expand-file-name "20260101T000001==1a--one__note.org" dir))
+               (org-agenda-custom-commands nil)
+               (orig-called nil))
+          (with-temp-file f1 (insert "#+title: One\n* TODO Task 1\n"))
+          (orgx-denote-setup-agenda-commands)
+          (cl-letf (((symbol-function 'orgx-denote-files)
+                     (lambda () (list f1))))
+            (should-not (get-file-buffer f1))
+            (orgx-denote--agenda-dispatcher-advice
+             (lambda (&rest _) (setq orig-called t))
+             nil "da" nil)
+            (should orig-called)
+            (should (get-file-buffer f1))
+            (kill-buffer (get-file-buffer f1))))
+      (delete-directory dir t))))
+
 (provide 'orgx-denote-test)
 ;;; orgx-denote-test.el ends here

@@ -21,6 +21,7 @@
 (require 'org)
 (require 'org-element)
 (require 'org-agenda)
+(require 'cl-lib)
 
 (declare-function org-element--property "org-element-ast")
 (declare-function denote-directories "denote")
@@ -34,6 +35,8 @@
 (declare-function denote-journal-capture-timestamp "denote-journal-capture")
 
 (declare-function orgx-skip-unless-open-question "orgx")
+(declare-function gen-mapc-async "gen")
+(declare-function hitl-plan-restricted-p "hitl-plan")
 
 (defvar org-agenda-custom-commands)
 (defvar denote-last-path)
@@ -186,31 +189,135 @@ signature, and formats the sequence category."
     (org-agenda-prefix-format '((todo . " %i %-8(orgx-denote-agenda-category) ")
                                 (tags . " %i %-8(orgx-denote-agenda-category) ")))))
 
+;;; Buffer warming and asynchronous agenda execution
+
+(defcustom orgx-denote-agenda-warm-chunk-size 5
+  "Number of denote buffers to open per idle tick during background warming."
+  :type 'natnum
+  :group 'orgx-denote)
+
+(defcustom orgx-denote-agenda-warm-delay 0.02
+  "Idle delay in seconds between buffer warming chunks."
+  :type 'number
+  :group 'orgx-denote)
+
+(defun orgx-denote--visit-file (file)
+  "Safely visit FILE in the background and bury its buffer."
+  (when (and file (stringp file) (file-exists-p file))
+    (unless (get-file-buffer file)
+      (let ((enable-local-variables (if (and (fboundp 'hitl-plan-restricted-p)
+                                             (hitl-plan-restricted-p))
+                                        nil
+                                      enable-local-variables))
+            (enable-dir-local-variables (if (and (fboundp 'hitl-plan-restricted-p)
+                                                 (hitl-plan-restricted-p))
+                                            nil
+                                          enable-dir-local-variables)))
+        (when-let* ((buf (find-file-noselect file)))
+          (when (buffer-live-p buf)
+            (bury-buffer buf)))))))
+
+;;;###autoload
+(cl-defun orgx-denote-warm-buffers-and-run (files on-done &key label
+                                                  (chunk-size orgx-denote-agenda-warm-chunk-size)
+                                                  (delay orgx-denote-agenda-warm-delay))
+  "Warm unvisited FILES in yielding batches using `gen-mapc-async', then call ON-DONE.
+If all FILES are already open in buffers (or in noninteractive batch mode),
+calls ON-DONE immediately."
+  (let* ((all (seq-filter #'stringp (mapcar #'expand-file-name files)))
+         (cold (seq-filter (lambda (f) (not (get-file-buffer f))) all)))
+    (if (or noninteractive (null cold))
+        (progn
+          (when (and noninteractive cold)
+            (mapc #'orgx-denote--visit-file cold))
+          (when on-done (funcall on-done)))
+      (message "Warming %d Denote file%s for %s..."
+               (length cold) (if (= (length cold) 1) "" "s") (or label "agenda"))
+      (if (fboundp 'gen-mapc-async)
+          (gen-mapc-async
+           #'orgx-denote--visit-file
+           cold
+           :chunk-size (max 1 (or chunk-size 5))
+           :idle t
+           :delay (or delay 0.02)
+           :name (format "orgx-denote-warm%s" (if label (format ":%s" label) ""))
+           :on-progress (lambda (done total)
+                          (message "Warming Denote files for %s: %d/%d..."
+                                   (or label "agenda") done total))
+           :on-done (lambda ()
+                      (message "Denote files ready. Rendering %s..." (or label "agenda"))
+                      (when on-done (funcall on-done))))
+        ;; Fallback when gen.el is not loaded
+        (letrec ((rem cold)
+                 (total (length cold))
+                 (done-count 0)
+                 (timer nil)
+                 (step
+                  (lambda ()
+                    (setq timer nil)
+                    (let ((count 0)
+                          (limit (max 1 (or chunk-size 5))))
+                      (while (and rem (< count limit))
+                        (orgx-denote--visit-file (pop rem))
+                        (cl-incf count)
+                        (cl-incf done-count))
+                      (message "Warming Denote files for %s: %d/%d..."
+                               (or label "agenda") done-count total)
+                      (if (null rem)
+                          (progn
+                            (message "Denote files ready. Rendering %s..." (or label "agenda"))
+                            (when on-done (funcall on-done)))
+                        (setq timer (run-with-idle-timer (or delay 0.02) nil step)))))))
+          (setq timer (run-with-idle-timer (or delay 0.02) nil step)))))))
+
 ;;;###autoload
 (defun orgx-denote-agenda-todos ()
   "Show all TODO items across the denote note tree."
   (interactive)
-  (org-tags-view t "+TODO=\"TODO\"|+TODO=\"INPROGRESS\"-question"))
+  (let ((files (orgx-denote-files)))
+    (orgx-denote-warm-buffers-and-run
+     files
+     (lambda ()
+       (let ((org-agenda-files files))
+         (org-tags-view t "+TODO=\"TODO\"|+TODO=\"INPROGRESS\"-question")))
+     :label "todos")))
 
 ;;;###autoload
 (defun orgx-denote-agenda-questions ()
   "Show all human questions across the denote tree."
   (interactive)
-  (org-tags-view t "+question|+TODO=\"QUESTION\""))
+  (let ((files (orgx-denote-files)))
+    (orgx-denote-warm-buffers-and-run
+     files
+     (lambda ()
+       (let ((org-agenda-files files))
+         (org-tags-view t "+question|+TODO=\"QUESTION\"")))
+     :label "questions")))
 
 ;;;###autoload
 (defun orgx-denote-agenda-composite ()
   "Show composite denote agenda, suppressing closed/completed notes."
   (interactive)
-  (let ((orgx-denote-agenda-suppress-completed t))
-    (org-tags-view t "+TODO=\"TODO\"|+TODO=\"INPROGRESS\"-question")))
+  (let ((files (orgx-denote-composite-files)))
+    (orgx-denote-warm-buffers-and-run
+     files
+     (lambda ()
+       (let ((orgx-denote-agenda-suppress-completed t)
+             (org-agenda-files files))
+         (org-tags-view t "+TODO=\"TODO\"|+TODO=\"INPROGRESS\"-question")))
+     :label "composite")))
 
 ;;;###autoload
 (defun orgx-denote-agenda-completed-plans ()
   "Show all items from completed plans across the denote tree."
   (interactive)
-  (let ((org-agenda-files (orgx-denote-completed-plan-files)))
-    (org-tags-view t "+TODO=\"DONE\"|+TODO=\"CANCELLED\"")))
+  (let ((files (orgx-denote-completed-plan-files)))
+    (orgx-denote-warm-buffers-and-run
+     files
+     (lambda ()
+       (let ((org-agenda-files files))
+         (org-tags-view t "+TODO=\"DONE\"|+TODO=\"CANCELLED\"")))
+     :label "completed-plans")))
 
 (defconst orgx-denote-agenda-commands
   `(("d" . "denote database files")
@@ -270,6 +377,35 @@ signature, and formats the sequence category."
       (setq org-agenda-custom-commands
             (cons cmd (seq-remove (lambda (c) (equal (car c) (car cmd)))
                                   org-agenda-custom-commands))))))
+
+(defun orgx-denote--extract-command-files (entry)
+  "Extract the list of files specified by custom command ENTRY, if any."
+  (let* ((settings (if (listp (nth 2 entry))
+                       (nth 3 entry)
+                     (nth 4 entry)))
+         (files-binding (assq 'org-agenda-files settings)))
+    (when files-binding
+      (condition-case nil
+          (eval (cadr files-binding) t)
+        (error nil)))))
+
+(defun orgx-denote--agenda-dispatcher-advice (orig-fn &optional arg keys restriction)
+  "Intercept Denote agenda views in `org-agenda' to warm buffers before rendering."
+  (let* ((key-str (and keys (format "%s" keys))))
+    (if (and key-str (string-prefix-p "d" key-str))
+        (let* ((custom (assoc key-str (and (boundp 'org-agenda-custom-commands) org-agenda-custom-commands)))
+               (files (and custom (orgx-denote--extract-command-files custom)))
+               (cold (and (consp files)
+                          (seq-filter (lambda (f) (and (stringp f) (not (get-file-buffer f)))) files))))
+          (if cold
+              (orgx-denote-warm-buffers-and-run
+               files
+               (lambda () (funcall orig-fn arg keys restriction))
+               :label key-str)
+            (funcall orig-fn arg keys restriction)))
+      (funcall orig-fn arg keys restriction))))
+
+(advice-add 'org-agenda :around #'orgx-denote--agenda-dispatcher-advice)
 
 
 ;;; Capture template integration
