@@ -754,7 +754,7 @@ buffer position."
   :doc "Global minor mode keymap activating commands under C-c o."
   "C-c o" orgx-command-map)
 
-(defvar orgx-mode--managed-settings
+(defcustom orgx-mode-managed-settings
   '((fill-column . 72)
     (org-return-follows-link . t)
     (org-use-speed-commands . orgx--use-speed-commands)
@@ -776,15 +776,17 @@ buffer position."
     (org-footnote-auto-label . nil)
     (org-footnote-define-inline . nil)
     (org-footnote-section . nil))
-  "Alist of (SYMBOL . VALUE) buffer-local settings managed by `orgx-mode'.")
+  "Alist of (SYMBOL . VALUE) buffer-local settings managed by `orgx-mode'."
+  :type '(alist :key-type symbol :value-type sexp)
+  :group 'orgx)
 
 (defvar-local orgx-mode--saved-settings nil
   "Alist of (SYMBOL . (LOCAL-P . VALUE)) saved before `orgx-mode' was enabled.")
 
 (defun orgx-mode--apply-settings ()
-  "Save previous buffer-local values and apply `orgx-mode--managed-settings'."
+  "Save previous buffer-local values and apply `orgx-mode-managed-settings'."
   (setq-local orgx-mode--saved-settings nil)
-  (dolist (pair orgx-mode--managed-settings)
+  (dolist (pair orgx-mode-managed-settings)
     (let ((sym (car pair))
           (val (cdr pair)))
       (push (cons sym (if (local-variable-p sym)
@@ -1116,7 +1118,7 @@ Activates `orgx-command-map' under C-c o."
   (add-to-list 'org-src-lang-modes '("javascript" . js))
   (add-to-list 'org-src-lang-modes '("rust" . rust)))
 
-(defvar orgx-global--managed-settings
+(defcustom orgx-global-managed-settings
   `((org-rst-headline-underline-characters . ,(list ?= ?- ?~ ?' ?^ ?`))
     (org-modules . ,orgx-default-modules)
     (org-todo-keywords . ,orgx-todo-keywords)
@@ -1147,15 +1149,17 @@ Activates `orgx-command-map' under C-c o."
     (org-agenda-todo-ignore-scheduled . t)
     (org-agenda-start-on-weekday . nil)
     (org-agenda-skip-function-global . orgx-skip-child-of-project-tag))
-  "Alist of (SYMBOL . VALUE) settings managed globally by `orgx-global-mode'.")
+  "Alist of (SYMBOL . VALUE) settings managed globally by `orgx-global-mode'."
+  :type '(alist :key-type symbol :value-type sexp)
+  :group 'orgx)
 
 (defvar orgx-global--saved-settings nil
   "Alist of (SYMBOL . (BOUNDP . VALUE)) saved before enabling.")
 
 (defun orgx-global--apply-settings ()
-  "Save previous values and apply `orgx-global--managed-settings'."
+  "Save previous values and apply `orgx-global-managed-settings'."
   (setq orgx-global--saved-settings nil)
-  (dolist (pair orgx-global--managed-settings)
+  (dolist (pair orgx-global-managed-settings)
     (let ((sym (car pair))
           (val (cdr pair)))
       (push (cons sym (if (boundp sym) (cons t (symbol-value sym)) (cons nil nil)))
