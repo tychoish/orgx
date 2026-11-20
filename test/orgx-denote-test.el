@@ -594,5 +594,73 @@ it is paired with)."
       (when-let* ((buffer (get-file-buffer file))) (kill-buffer buffer))
       (delete-file file))))
 
+(ert-deftest orgx-denote-warm-schedules-yielding-timer-test ()
+  "Cold agenda warmup schedules ordinary timers in small chunks."
+  (let ((noninteractive nil)
+        recorded)
+    (cl-letf (((symbol-function 'orgx-denote--file-warmed-p) #'ignore)
+              ((symbol-function 'gen-mapc-async)
+               (lambda (_fn _items &rest options) (setq recorded options))))
+      (orgx-denote-warm-buffers-and-run '("/tmp/cold.org") #'ignore)
+      (should (= (plist-get recorded :chunk-size) 1))
+      (should-not (plist-get recorded :idle))
+      (should (> (plist-get recorded :delay) 0)))))
+
+(ert-deftest orgx-denote-agenda-async-context-test ()
+  "The delayed agenda callback keeps its original buffer and dynamic settings."
+  (let ((origin (generate-new-buffer " *orgx-agenda-origin*"))
+        callback captured)
+    (unwind-protect
+        (progn
+          (with-current-buffer origin
+            (let ((org-agenda-custom-commands '(("dc" "Composite" nil ((org-agenda-files (list "/tmp/a.org"))))))
+                  (org-agenda-files '("/tmp/special.org")))
+              (cl-letf (((symbol-function 'orgx-denote--file-warmed-p) #'ignore)
+                        ((symbol-function 'orgx-denote-warm-buffers-and-run)
+                         (lambda (_files on-done &rest _) (setq callback on-done))))
+                (orgx-denote--agenda-dispatcher-advice
+                 (lambda (&rest _) (setq captured (list (current-buffer)
+                                                       org-agenda-custom-commands
+                                                       org-agenda-files)))
+                 nil "dc" nil))))
+          (with-temp-buffer (funcall callback))
+          (should (eq (car captured) origin))
+          (should (equal (caar (cadr captured)) "dc"))
+          (should (equal (nth 2 captured) '("/tmp/special.org"))))
+      (kill-buffer origin))))
+
+(ert-deftest orgx-denote-agenda-warms-other-custom-views-test ()
+  "Custom file-scoped views are warmed even when their key is not Denote's."
+  (let ((org-agenda-custom-commands '(("z" "Custom" todo "" ((org-agenda-files (list "/tmp/a.org"))))))
+        warmed)
+    (cl-letf (((symbol-function 'orgx-denote--file-warmed-p) #'ignore)
+              ((symbol-function 'orgx-denote-warm-buffers-and-run)
+               (lambda (files _callback &rest _) (setq warmed files))))
+      (orgx-denote--agenda-dispatcher-advice #'ignore nil "z" nil)
+      (should (equal warmed '("/tmp/a.org"))))))
+
+(ert-deftest orgx-denote-warm-allows-other-timers-test ()
+  "Warmup yields to other timer callbacks before processing every file."
+  (require 'gen)
+  (let ((noninteractive nil)
+        (orgx-denote-agenda-warm-chunk-size 1)
+        (orgx-denote-agenda-warm-delay 0.01)
+        (processed 0)
+        (observed nil)
+        (finished nil))
+    (cl-letf (((symbol-function 'orgx-denote--file-warmed-p) #'ignore)
+              ((symbol-function 'orgx-denote--visit-file)
+               (lambda (_file) (setq processed (1+ processed)))))
+      (run-at-time 0.015 nil (lambda () (setq observed processed)))
+      (orgx-denote-warm-buffers-and-run
+       '("/tmp/a.org" "/tmp/b.org" "/tmp/c.org" "/tmp/d.org")
+       (lambda () (setq finished t)))
+      (let ((deadline (+ (float-time) 3)))
+        (while (and (not finished) (< (float-time) deadline))
+          (accept-process-output nil 0.01)))
+      (should finished)
+      (should observed)
+      (should (< observed 4)))))
+
 (provide 'orgx-denote-test)
 ;;; orgx-denote-test.el ends here
