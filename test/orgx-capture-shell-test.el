@@ -1128,5 +1128,81 @@
         (kill-buffer agenda)
         (kill-buffer shell)))))
 
+(ert-deftest orgx-capture-shell-org-completion-target-test ()
+  "Complete target-specific TODO keywords in multiline shell input."
+  (let* ((dir (make-temp-file "orgx-completion-" t))
+         (file (expand-file-name "target.org" dir))
+         (orgx-capture-shell-enable-flyspell nil)
+         (orgx-capture-shell-enable-corfu nil))
+    (unwind-protect
+        (progn
+          (with-temp-file file (insert "#+TODO: OPEN WIP | DONE\n"))
+          (with-temp-buffer
+            (orgx-capture-shell-mode)
+            (setq orgx-capture-shell-current-file file)
+            (orgx-capture-shell--ensure-process)
+            (unwind-protect
+                (progn
+                  (comint-output-filter (get-buffer-process (current-buffer))
+                                        (orgx-capture-shell--prompt-string))
+                  (insert "first line\n* WI")
+                  (let ((capf (orgx-capture-shell-org-completion-at-point)))
+                    (should (equal (buffer-substring-no-properties (nth 0 capf) (nth 1 capf)) "WI"))
+                    (should (member "WIP" (all-completions "WI" (nth 2 capf))))))
+              (delete-process (get-buffer-process (current-buffer))))))
+      (delete-directory dir t))))
+
+(ert-deftest orgx-capture-shell-org-completion-link-test ()
+  "Complete file links relative to the target directory."
+  (let* ((dir (make-temp-file "orgx-completion-" t))
+         (file (expand-file-name "target.org" dir))
+         (orgx-capture-shell-enable-flyspell nil)
+         (orgx-capture-shell-enable-corfu nil))
+    (unwind-protect
+        (progn
+          (with-temp-file file (insert "* Target\n"))
+          (with-temp-file (expand-file-name "another.txt" dir))
+          (with-temp-buffer
+            (orgx-capture-shell-mode)
+            (setq orgx-capture-shell-current-file file)
+            (orgx-capture-shell--ensure-process)
+            (unwind-protect
+                (progn
+                  (comint-output-filter (get-buffer-process (current-buffer))
+                                        (orgx-capture-shell--prompt-string))
+                  (insert "[[file:ano")
+                  (let ((capf (orgx-capture-shell-org-completion-at-point)))
+                    (should capf)
+                    (should (member "another.txt" (all-completions "ano" (nth 2 capf))))))
+              (delete-process (get-buffer-process (current-buffer))))))
+      (delete-directory dir t))))
+
+(ert-deftest orgx-capture-shell-org-completion-end-to-end-test ()
+  "Org completion edits shell input and releases its private buffer on kill."
+  (let* ((dir (make-temp-file "orgx-completion-" t))
+         (file (expand-file-name "target.org" dir))
+         (shell (generate-new-buffer " *shell-completion-test*"))
+         (orgx-capture-shell-enable-flyspell nil)
+         (orgx-capture-shell-enable-corfu nil)
+         shadow)
+    (unwind-protect
+        (progn
+          (with-temp-file file (insert "#+TODO: OPEN WIP | DONE\n"))
+          (with-current-buffer shell
+            (orgx-capture-shell-mode)
+            (setq orgx-capture-shell-current-file file)
+            (orgx-capture-shell--ensure-process)
+            (comint-output-filter (get-buffer-process shell) (orgx-capture-shell--prompt-string))
+            (insert "* WI")
+            (completion-at-point)
+            (should (string-match-p "\\* WIP" (buffer-string)))
+            (setq shadow orgx-capture-shell--completion-buffer)
+            (should (buffer-live-p shadow))
+            (delete-process (get-buffer-process shell)))
+          (kill-buffer shell)
+          (should-not (buffer-live-p shadow)))
+      (when (buffer-live-p shell) (kill-buffer shell))
+      (delete-directory dir t))))
+
 (provide 'orgx-capture-shell-test)
 ;;; orgx-capture-shell-test.el ends here

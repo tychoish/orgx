@@ -22,6 +22,7 @@
 
 (require 'cl-lib)
 (require 'comint)
+(require 'pcomplete)
 (require 'annotated-completing-read)
 (require 'button)
 (require 'seq)
@@ -968,6 +969,105 @@ Completes command names, `/template' names, and `/target' files and headlines."
             (list arg-start (point) #'completion-file-name-table
                   :exclusive 'no))))))))
 
+(defvar-local orgx-capture-shell--completion-buffer nil
+  "Private Org buffer used to provide Org completions.")
+
+(defvar-local orgx-capture-shell--completion-context-cache nil
+  "Cached target file context for Org completion.")
+
+(defun orgx-capture-shell--completion-context (file source)
+  "Return Org completion variables for FILE, optionally visited in SOURCE."
+  (let* ((attributes (and file (not source) (file-attributes file)))
+         (key (list file source (and source (buffer-chars-modified-tick source))
+                    (and attributes (file-attribute-modification-time attributes))
+                    (and attributes (file-attribute-size attributes)))))
+    (unless (equal key (car orgx-capture-shell--completion-context-cache))
+      (let ((vars '(org-todo-keywords-1 org-todo-regexp org-current-tag-alist
+                    org-link-abbrev-alist-local org-file-tags)))
+        (setq orgx-capture-shell--completion-context-cache
+              (cons key
+                    (if (and source (with-current-buffer source (derived-mode-p 'org-mode)))
+                        (seq-map (lambda (var) (cons var (buffer-local-value var source))) vars)
+                      (with-temp-buffer
+                        (when file
+                          (setq default-directory (file-name-directory file))
+                          (if source
+                              (insert-buffer-substring source)
+                            (when (file-readable-p file) (insert-file-contents file))))
+                        (delay-mode-hooks (org-mode))
+                        (seq-map (lambda (var) (cons var (symbol-value var))) vars)))))))
+    (cdr orgx-capture-shell--completion-context-cache)))
+
+(defun orgx-capture-shell--kill-completion-buffer ()
+  "Kill the private completion buffer along with its shell."
+  (when (buffer-live-p orgx-capture-shell--completion-buffer)
+    (kill-buffer orgx-capture-shell--completion-buffer)))
+
+(defun orgx-capture-shell-org-completion-at-point ()
+  "Complete Org syntax in the current input using Org's completion table."
+  (when-let* ((process (get-buffer-process (current-buffer)))
+              (start (marker-position (process-mark process)))
+              ((>= (point) start)))
+    (let ((input (buffer-substring-no-properties start (point-max)))
+          (offset (- (point) start))
+          (target orgx-capture-shell-current-file)
+          (directory default-directory)
+          (source (and orgx-capture-shell-current-file
+                       (get-file-buffer orgx-capture-shell-current-file))))
+      (unless (buffer-live-p orgx-capture-shell--completion-buffer)
+        (setq orgx-capture-shell--completion-buffer
+              (generate-new-buffer " *orgx-capture-completion*"))
+        (with-current-buffer orgx-capture-shell--completion-buffer
+          (delay-mode-hooks (org-mode))))
+      (let ((shadow orgx-capture-shell--completion-buffer)
+            (context (orgx-capture-shell--completion-context target source)))
+        (with-current-buffer shadow
+          (setq-local default-directory
+                      (if target (file-name-directory target) directory))
+          (seq-do (lambda (entry)
+                    (set (make-local-variable (car entry)) (cdr entry)))
+                  context)
+          (let ((inhibit-read-only t))
+            (erase-buffer)
+            (insert input))
+          (goto-char (+ (point-min) offset))
+          (when-let* ((completion
+                       (or (pcomplete-completions-at-point)
+                           (save-excursion
+                             (when (re-search-backward "\\[\\[file:\\([^]]*\\)\\="
+                                                       (line-beginning-position) t)
+                               (list (match-beginning 1) (match-end 1)
+                                     #'completion-file-name-table))))))
+            (let ((table (nth 2 completion))
+                  (props (copy-sequence (nthcdr 3 completion)))
+                  (generation (buffer-chars-modified-tick))
+                  (termination pcomplete-termination-string))
+              (seq-do
+               (lambda (property)
+                 (when-let* ((fn (plist-get props property)))
+                   (setq props
+                         (plist-put props property
+                                    (lambda (&rest args)
+                                      (with-current-buffer shadow
+                                        (apply fn args)))))))
+               '(:predicate :annotation-function :company-docsig :company-kind))
+              (when-let* ((exit (plist-get props :exit-function)))
+                (setq props
+                      (plist-put props :exit-function
+                                 (lambda (string status)
+                                   (let ((pcomplete-termination-string termination))
+                                     (funcall exit string status))))))
+              (setq props (plist-put props :exclusive 'no))
+              (append
+               (list (+ start (1- (nth 0 completion)))
+                     (+ start (1- (nth 1 completion)))
+                     (lambda (string predicate action)
+                       (when (and (buffer-live-p shadow)
+                                  (= generation (buffer-chars-modified-tick shadow)))
+                         (with-current-buffer shadow
+                           (complete-with-action action table string predicate)))))
+               props))))))))
+
 ;;; Major Mode Definition
 
 (declare-function annotated-completing-read "annotated-completing-read")
@@ -1050,7 +1150,10 @@ Ignores prompts, slash commands, and short syntax."
   (setq comint-input-sender #'orgx-capture-shell-input-sender)
   (setq-local fill-column 80)
   (visual-line-mode 1)
+  (add-hook 'completion-at-point-functions #'orgx-capture-shell-org-completion-at-point nil t)
   (add-hook 'completion-at-point-functions #'orgx-capture-shell-completion-at-point nil t)
+  (add-hook 'kill-buffer-hook #'orgx-capture-shell--kill-completion-buffer nil t)
+  (add-hook 'change-major-mode-hook #'orgx-capture-shell--kill-completion-buffer nil t)
 
   ;; Autocomplete and spellcheck
   (when (and orgx-capture-shell-enable-corfu (fboundp 'corfu-mode))
