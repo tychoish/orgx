@@ -58,6 +58,31 @@
 (defconst orgx-denote-agenda-category-width 8
   "Max width in characters for `orgx-denote-agenda-category'.")
 
+;;; Denote link storage
+
+(declare-function denote-file-is-in-denote-directory-p "denote")
+(declare-function denote-file-has-denoted-filename-p "denote")
+(declare-function denote-retrieve-filename-identifier "denote")
+(declare-function denote-get-link-description "denote")
+(defvar org-store-link-plist)
+
+(defun orgx-denote--store-non-org-link (original &rest args)
+  "Call ORIGINAL with ARGS, avoiding Org parsing in non-Org Denote files."
+  (if (derived-mode-p 'org-mode)
+      (apply original args)
+    (when-let* ((file (buffer-file-name))
+                ((file-regular-p file))
+                ((denote-file-is-in-denote-directory-p file))
+                ((denote-file-has-denoted-filename-p file))
+                (identifier (denote-retrieve-filename-identifier file))
+                (description (denote-get-link-description file)))
+      (org-link-store-props :type "denote" :description description
+                            :link (concat "denote:" identifier))
+      org-store-link-plist)))
+
+(with-eval-after-load 'denote
+  (advice-add 'denote-link-ol-store :around #'orgx-denote--store-non-org-link))
+
 ;;; File discovery and classification
 
 (defun orgx-denote-files ()

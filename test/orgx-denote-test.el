@@ -509,5 +509,41 @@ it is paired with)."
           (when (get-file-buffer f1) (kill-buffer (get-file-buffer f1))))
       (delete-directory dir t))))
 
+(ert-deftest orgx-denote-store-link-non-org-test ()
+  "Store a Denote link in a text buffer without invoking Org parsing."
+  (require 'denote)
+  (let* ((denote-directory (make-temp-file "orgx-denote-link-" t))
+         (file (expand-file-name "20261119T120000--note__test.md" denote-directory)))
+    (unwind-protect
+        (progn
+          (with-temp-file file (insert "# Note\n"))
+          (with-current-buffer (find-file-noselect file)
+            (text-mode)
+            (let ((org-stored-links nil))
+              (cl-letf (((symbol-function 'org-element-at-point)
+                         (lambda (&rest _) (error "Unexpected Org parsing"))))
+                (should (equal (org-store-link nil)
+                               "[[denote:20261119T120000][note]]"))))))
+      (when-let* ((buffer (get-file-buffer file))) (kill-buffer buffer))
+      (delete-directory denote-directory t))))
+
+(ert-deftest orgx-denote-store-link-org-test ()
+  "Org buffers retain Denote's existing heading and custom ID behavior."
+  (require 'denote)
+  (let* ((denote-directory (make-temp-file "orgx-denote-link-" t))
+         (file (expand-file-name "20261119T120000--note__test.org" denote-directory)))
+    (unwind-protect
+        (progn
+          (with-temp-file file (insert "* Heading\n:PROPERTIES:\n:CUSTOM_ID: test-id\n:END:\n"))
+          (with-current-buffer (find-file-noselect file)
+            (org-mode)
+            (goto-char (point-min))
+            (let ((org-store-link-plist nil))
+              (denote-link-ol-store)
+              (should (equal (plist-get org-store-link-plist :link)
+                             "denote:20261119T120000::#test-id")))))
+      (when-let* ((buffer (get-file-buffer file))) (kill-buffer buffer))
+      (delete-directory denote-directory t))))
+
 (provide 'orgx-denote-test)
 ;;; orgx-denote-test.el ends here
