@@ -971,7 +971,9 @@ Only triggers command menu when point is at prompt start."
   :parent comint-mode-map
   "C-c C-u" #'orgx-capture-shell--undo-last
   "C-c C-k" #'comint-kill-input
+  "C-c C-c" #'comint-send-input
   "C-c C-o" #'orgx-capture-shell-command-menu
+  "C-c C-r" #'orgx-capture-shell-restart
   "C-c m"   #'orgx-capture-shell-transient
   "C-j" #'newline
   "C-<return>" #'orgx-capture-shell-send-form
@@ -1020,13 +1022,41 @@ Ignores prompts, slash commands, and short syntax."
 
 ;;; Interactive Entrypoints
 
+(defvar-local orgx-capture-shell--saved-input-marker nil
+  "Input boundary retained when the shell helper exits.")
+
+(defun orgx-capture-shell--process-sentinel (process _event)
+  "Save PROCESS input boundary when the helper exits."
+  (when (and (not (process-live-p process)) (buffer-live-p (process-buffer process)))
+    (with-current-buffer (process-buffer process)
+      (setq orgx-capture-shell--saved-input-marker
+            (copy-marker (process-mark process))))))
+
 (defun orgx-capture-shell--ensure-process (&optional buf)
   "Ensure a running dummy comint process exists in BUF."
   (let ((b (or buf (current-buffer))))
     (unless (comint-check-proc b)
       (let ((proc (start-process "orgx-capture-shell" b "cat")))
         (set-process-query-on-exit-flag proc nil)
+        (set-process-sentinel proc #'orgx-capture-shell--process-sentinel)
         proc))))
+
+(defun orgx-capture-shell-restart ()
+  "Restart the shell helper, preserving the current input."
+  (interactive)
+  (unless (derived-mode-p 'orgx-capture-shell-mode)
+    (user-error "Not in an orgx capture shell"))
+  (let* ((old-process (get-buffer-process (current-buffer)))
+         (input-start (or (and old-process (marker-position (process-mark old-process)))
+                          (and (markerp orgx-capture-shell--saved-input-marker)
+                               (marker-position orgx-capture-shell--saved-input-marker)))))
+    (when old-process
+      (delete-process old-process))
+    (let ((process (orgx-capture-shell--ensure-process)))
+      (if (and input-start (> (point-max) (point-min)))
+          (set-marker (process-mark process) input-start)
+        (set-marker (process-mark process) (point-max))
+        (comint-output-filter process (orgx-capture-shell--prompt-string))))))
 
 ;;;###autoload
 (defun orgx-capture-shell ()
@@ -1038,7 +1068,10 @@ Ignores prompts, slash commands, and short syntax."
     (with-current-buffer buf
       (unless (derived-mode-p 'orgx-capture-shell-mode)
         (orgx-capture-shell-mode))
-      (orgx-capture-shell--ensure-process buf)
+      (if (and (not (comint-check-proc buf))
+               orgx-capture-shell--saved-input-marker)
+          (orgx-capture-shell-restart)
+        (orgx-capture-shell--ensure-process buf))
       (goto-char (point-max))
       (when (= (point-min) (point-max))
         (comint-output-filter
@@ -1140,6 +1173,7 @@ window.  If it is hidden or not active, display it in the bottom popup window."
     ("t" "Toggle Popup Window" orgx-capture-shell-toggle)
     ("F" "Capture Form" orgx-capture-shell-form)
     ("u" "Undo Last Capture" orgx-capture-shell-undo-command)
+    ("r" "Restart Helper" orgx-capture-shell-restart)
     ("o" "Visit Current Target" orgx-capture-shell-visit-target-command)]
    ["Switch Modality"
     ("f" "Set Target File" orgx-capture-shell-set-target-file)

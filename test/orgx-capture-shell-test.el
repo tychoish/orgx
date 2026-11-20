@@ -956,5 +956,47 @@
       (should (string-match-p "Captured -> \\[.*:Tasks\\] \\* TODO First line of multi-line task\\.\\.\\." msg))
       (should-not (string-match-p "Second line" msg)))))
 
+
+(ert-deftest orgx-capture-shell-submit-binding-test ()
+  "C-c C-c submits capture input instead of interrupting the helper."
+  (should (eq (lookup-key orgx-capture-shell-mode-map (kbd "C-c C-c"))
+              #'comint-send-input)))
+
+(ert-deftest orgx-capture-shell-restart-test ()
+  "Restarting a dead helper leaves the shell usable."
+  (let ((orgx-capture-shell-enable-flyspell nil)
+        (orgx-capture-shell-enable-corfu nil))
+    (with-temp-buffer
+      (orgx-capture-shell-mode)
+      (orgx-capture-shell--ensure-process)
+      (delete-process (get-buffer-process (current-buffer)))
+      (orgx-capture-shell-restart)
+      (should (comint-check-proc (current-buffer)))
+      (should (= (process-mark (get-buffer-process (current-buffer))) (point-max)))
+      (delete-process (get-buffer-process (current-buffer))))))
+
+(ert-deftest orgx-capture-shell-restart-preserves-input-test ()
+  "Restart preserves multiline input and does not duplicate an empty prompt."
+  (let ((orgx-capture-shell-enable-flyspell nil)
+        (orgx-capture-shell-enable-corfu nil)
+        received)
+    (with-temp-buffer
+      (orgx-capture-shell-mode)
+      (orgx-capture-shell--ensure-process)
+      (comint-output-filter (get-buffer-process (current-buffer))
+                            (orgx-capture-shell--prompt-string))
+      (let ((before (buffer-string)))
+        (orgx-capture-shell-restart)
+        (should (equal before (buffer-string))))
+      (goto-char (point-max))
+      (insert "first line\nsecond line")
+      (delete-process (get-buffer-process (current-buffer)))
+      (orgx-capture-shell-restart)
+      (let ((comint-input-sender (lambda (_process input) (setq received input))))
+        (goto-char (point-max))
+        (comint-send-input))
+      (should (equal received "first line\nsecond line"))
+      (delete-process (get-buffer-process (current-buffer))))))
+
 (provide 'orgx-capture-shell-test)
 ;;; orgx-capture-shell-test.el ends here
