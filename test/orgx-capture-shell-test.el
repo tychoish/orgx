@@ -5,6 +5,7 @@
 (require 'ert)
 (require 'org)
 (require 'org-capture)
+(require 'org-agenda)
 (require 'orgx-capture-shell)
 
 (ert-deftest orgx-capture-shell-target-resolution-test ()
@@ -997,6 +998,135 @@
         (comint-send-input))
       (should (equal received "first line\nsecond line"))
       (delete-process (get-buffer-process (current-buffer))))))
+
+(ert-deftest orgx-capture-shell-context-name-test ()
+  "Context changes update the name while preserving shell lookup."
+  (let ((orgx-capture-shell-enable-flyspell nil)
+        (orgx-capture-shell-enable-corfu nil)
+        (orgx-capture-shell-buffer-name "*test-capture-shell*")
+        (orgx-capture-shell--buffer nil))
+    (with-temp-buffer
+      (orgx-capture-shell-mode)
+      (let ((shell (current-buffer)))
+        (setq orgx-capture-shell--buffer shell)
+        (setq orgx-capture-shell-current-file "/tmp/notes.org")
+        (orgx-capture-shell-set-template 'note)
+        (should (string-match-p (regexp-quote "notes.org · note") (buffer-name)))
+        (should (eq shell (orgx-capture-shell--find-buffer)))
+        (orgx-capture-shell--execute-slash-command "/template journal")
+        ;; Sender refreshes names after slash command execution.
+        (orgx-capture-shell--rename-buffer)
+        (should (string-match-p "journal" (buffer-name)))))))
+
+(ert-deftest orgx-capture-shell-template-acr-test ()
+  "The interactive template picker uses annotated completion."
+  (let (table)
+    (cl-letf (((symbol-function 'annotated-completing-read)
+               (lambda (candidates &rest _args)
+                 (setq table candidates)
+                 "journal")))
+      (with-temp-buffer
+        (orgx-capture-shell-mode)
+        (call-interactively #'orgx-capture-shell-set-template)
+        (should (eq orgx-capture-shell-current-template 'journal))
+        (should (assoc "journal" table))))))
+
+(ert-deftest orgx-capture-shell-display-below-other-test ()
+  "Only split the other side when it contains an agenda."
+  (save-window-excursion
+    (delete-other-windows)
+    (let ((left (selected-window))
+          (agenda (generate-new-buffer " *test-agenda*"))
+          (shell (generate-new-buffer " *test-shell*")))
+      (unwind-protect
+          (let ((right (split-window-right)))
+            (set-window-buffer right agenda)
+            (with-current-buffer agenda (org-agenda-mode))
+            (select-window left)
+            (let ((result (orgx-capture-shell--display-below-other shell nil)))
+              (should (window-live-p result))
+              (should (eq shell (window-buffer result)))
+              (should (eq agenda (window-buffer right)))
+              (should-not (orgx-capture-shell--display-below-other shell nil))))
+        (kill-buffer agenda)
+        (kill-buffer shell)))))
+
+(ert-deftest orgx-capture-shell-display-does-not-split-unrelated-test ()
+  "An unrelated other window keeps the regular bottom display behavior."
+  (save-window-excursion
+    (delete-other-windows)
+    (let ((other (split-window-right)))
+      (set-window-buffer other (get-buffer-create " *test-normal*"))
+      (should-not (orgx-capture-shell--display-below-other (current-buffer) nil))
+      (kill-buffer (window-buffer other)))))
+
+(ert-deftest orgx-capture-shell-reopen-after-context-change-test ()
+  "A submitted template switch preserves shell identity and form defaults."
+  (let ((orgx-capture-shell--buffer nil)
+        (orgx-capture-shell-buffer-name "*test-capture-shell-reopen*")
+        (orgx-capture-shell-window-rule nil)
+        (orgx-capture-shell-enable-flyspell nil)
+        (orgx-capture-shell-enable-corfu nil)
+        shell)
+    (cl-letf (((symbol-function 'pop-to-buffer) #'identity))
+      (unwind-protect
+          (progn
+            (setq shell (orgx-capture-shell))
+            (with-current-buffer shell
+              (goto-char (point-max))
+              (insert "/template journal")
+              (comint-send-input)
+              (should (string-match-p "journal" (buffer-name))))
+            (should (eq shell (orgx-capture-shell)))
+            (should (eq 'journal (plist-get (orgx-capture-shell--form-defaults)
+                                            :template))))
+        (when (buffer-live-p shell)
+          (when-let* ((process (get-buffer-process shell)))
+            (delete-process process))
+          (kill-buffer shell))))))
+
+(ert-deftest orgx-capture-shell-file-acr-test ()
+  "The file picker offers the current target through annotated completion."
+  (orgx-capture-shell-test--with-file "* Tasks\n"
+    (let ((orgx-capture-shell-enable-flyspell nil)
+          (orgx-capture-shell-enable-corfu nil)
+          offered)
+      (with-temp-buffer
+        (orgx-capture-shell-mode)
+        (setq orgx-capture-shell-current-file file)
+        (cl-letf (((symbol-function 'annotated-completing-read)
+                   (lambda (table &rest _args)
+                     (setq offered table)
+                     file))
+                  ((symbol-function 'completing-read)
+                   (lambda (&rest _) "Tasks")))
+          (call-interactively #'orgx-capture-shell-set-target-file)
+          (should (assoc file offered))
+          (should (equal orgx-capture-shell-current-headline "Tasks")))))))
+
+(ert-deftest orgx-capture-shell-window-rule-updates-test ()
+  "Registering replaces an old shell rule and displays below the agenda."
+  (save-window-excursion
+    (delete-other-windows)
+    (let* ((orgx-capture-shell-buffer-name "*test-display-shell*")
+           (display-buffer-alist
+            `((,(regexp-quote orgx-capture-shell-buffer-name) display-buffer-at-bottom)))
+           (left (selected-window))
+           (right (split-window-right))
+           (agenda (generate-new-buffer " *test-display-agenda*"))
+           (shell (generate-new-buffer orgx-capture-shell-buffer-name)))
+      (unwind-protect
+          (progn
+            (set-window-buffer right agenda)
+            (with-current-buffer agenda (org-agenda-mode))
+            (select-window left)
+            (orgx-capture-shell-register-window-rule)
+            (let ((window (display-buffer shell)))
+              (should (eq shell (window-buffer window)))
+              (should (= (car (window-edges right)) (car (window-edges window))))
+              (should (= (window-total-height window) orgx-capture-shell-popup-height))))
+        (kill-buffer agenda)
+        (kill-buffer shell)))))
 
 (provide 'orgx-capture-shell-test)
 ;;; orgx-capture-shell-test.el ends here
