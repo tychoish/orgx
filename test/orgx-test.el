@@ -750,6 +750,21 @@ and switches to the one selected via `annotated-completing-read'."
     (orgx-set-weekday-of-timestamp)
     (should (equal (buffer-string) "<2026-11-20 Fri>"))))
 
+(ert-deftest orgx-skip-open-question-preserves-point-test ()
+  "Question filtering leaves point on a nested candidate and skips its subtree."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Parent\n** QUESTION Candidate\n*** Response\n* Other\n")
+    (goto-char (point-min))
+    (forward-line 1)
+    (let ((start (point)))
+      (should-not (orgx-skip-unless-open-question))
+      (should (= start (point))))
+    (forward-line 1)
+    (let ((start (point)) (skip (orgx-skip-unless-open-question)))
+      (should (> skip start))
+      (should (= start (point))))))
+
 (provide 'orgx-test)
 ;;; Entry utilities
 

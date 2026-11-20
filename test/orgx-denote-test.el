@@ -545,5 +545,54 @@ it is paired with)."
       (when-let* ((buffer (get-file-buffer file))) (kill-buffer buffer))
       (delete-directory denote-directory t))))
 
+(ert-deftest orgx-denote-composite-nested-question-test ()
+  "The composite agenda renders nested questions and subsequent tasks."
+  (let ((file (make-temp-file "orgx-agenda-" nil ".org"
+                              "* Parent\n** QUESTION Nested :question:\n*** Context\n* TODO Later\n"))
+        (org-todo-keywords '((sequence "TODO" "QUESTION" "|" "DONE")))
+        (org-agenda-custom-commands nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'orgx-denote-composite-files) (lambda () (list file))))
+          (orgx-denote-setup-agenda-commands)
+          (org-agenda nil "dc")
+          (with-current-buffer org-agenda-buffer-name
+            (should (string-match-p "Nested" (buffer-string)))
+            (should (string-match-p "Later" (buffer-string)))))
+      (when-let* ((buffer (get-file-buffer file))) (kill-buffer buffer))
+      (delete-file file))))
+
+(ert-deftest orgx-denote-agenda-buffer-mode-check-test ()
+  "Agenda filters inspect the file buffer, not the calling buffer."
+  (let ((file (make-temp-file "orgx-mode-" nil ".org" "* Test\n")))
+    (unwind-protect
+        (let ((buffer (find-file-noselect file)))
+          (with-current-buffer buffer
+            (org-mode)
+            (setq-local orgx-test-unchanged 'present))
+          (with-temp-buffer
+            (fundamental-mode)
+            (orgx--ensure-agenda-file-buffer-mode buffer)
+            (orgx-denote--ensure-agenda-file-buffer-mode buffer))
+          (with-current-buffer buffer
+            (should (eq orgx-test-unchanged 'present))))
+      (when-let* ((buffer (get-file-buffer file))) (kill-buffer buffer))
+      (delete-file file))))
+
+(ert-deftest orgx-denote-agenda-buffer-mode-repair-test ()
+  "Agenda filters repair a non-Org file buffer even when the caller is Org."
+  (let ((file (make-temp-file "orgx-mode-" nil ".org" "* Test\n")))
+    (unwind-protect
+        (let ((buffer (find-file-noselect file)))
+          (with-temp-buffer
+            (org-mode)
+            (with-current-buffer buffer (fundamental-mode))
+            (orgx--ensure-agenda-file-buffer-mode buffer)
+            (should (with-current-buffer buffer (derived-mode-p 'org-mode)))
+            (with-current-buffer buffer (fundamental-mode))
+            (orgx-denote--ensure-agenda-file-buffer-mode buffer)
+            (should (with-current-buffer buffer (derived-mode-p 'org-mode)))))
+      (when-let* ((buffer (get-file-buffer file))) (kill-buffer buffer))
+      (delete-file file))))
+
 (provide 'orgx-denote-test)
 ;;; orgx-denote-test.el ends here

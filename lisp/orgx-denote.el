@@ -466,7 +466,7 @@ immediately."
   (when (and (buffer-live-p buf)
              (when-let* ((file (buffer-file-name buf)))
                (string-match-p "\\.org\\'" file))
-             (not (derived-mode-p 'org-mode)))
+             (with-current-buffer buf (not (derived-mode-p 'org-mode))))
     (let ((enable-local-variables (if (and (fboundp 'hitl-plan-restricted-p)
                                            (hitl-plan-restricted-p))
                                       nil

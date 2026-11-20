@@ -247,7 +247,7 @@ Updates `local-notes-directory', `org-directory',
   (when (and (buffer-live-p buf)
              (when-let* ((file (buffer-file-name buf)))
                (string-match-p "\\.org\\'" file))
-             (not (derived-mode-p 'org-mode)))
+             (with-current-buffer buf (not (derived-mode-p 'org-mode))))
     (let ((enable-local-variables (if (and (fboundp 'hitl-plan-restricted-p)
                                            (hitl-plan-restricted-p))
                                       nil
@@ -443,8 +443,9 @@ processed; descendants move with their parent."
                             (and hl (string-prefix-p "ANSWERED " hl))))
            (is-metadata (member hl '("Context" "Response" "LOGBOOK" "PROPERTIES")))
            (is-sub-under-question (and (not (member "question" local-tags))
-                                       (org-up-heading-safe)
-                                       (member "question" (org-get-tags nil t)))))
+                                       (save-excursion
+                                         (and (org-up-heading-safe)
+                                              (member "question" (org-get-tags nil t)))))))
       (if (or is-answered is-metadata is-sub-under-question)
           (save-excursion (org-end-of-subtree t) (point))
         nil))))
