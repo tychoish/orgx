@@ -332,10 +332,19 @@ Otherwise call ORIG-FUN with EVENT."
 (defun orgx-set-weekday-of-timestamp ()
   "Add day of the week to an active timestamp at point."
   (interactive)
-  (let ((time (org-time-string-to-time (thing-at-point 'line t))))
-    (when time
-      (delete-region (line-beginning-position) (line-end-position))
-      (insert (format-time-string "<%Y-%m-%d %a>" time)))))
+  (when-let* ((element (org-element-context))
+              ((eq (org-element-type element) 'timestamp))
+              ((eq (org-element-property :type element) 'active))
+              ((not (org-element-property :hour-start element)))
+              ((not (org-element-property :repeater-type element)))
+              ((not (org-element-property :warning-type element)))
+              (begin (org-element-property :begin element))
+              (end (org-element-property :end element))
+              ((= begin (line-beginning-position)))
+              ((= end (line-end-position)))
+              (time (org-time-string-to-time (buffer-substring-no-properties begin end))))
+    (delete-region begin end)
+    (insert (format-time-string "<%Y-%m-%d %a>" time))))
 
 (defun orgx-skip-child-of-project-tag ()
   "Skip children of headings tagged with any element of `orgx-project-tags'.

@@ -708,6 +708,48 @@ and switches to the one selected via `annotated-completing-read'."
       (when (file-exists-p temp-file) (delete-file temp-file))
       (when-let* ((buf (find-buffer-visiting temp-file))) (kill-buffer buf)))))
 
+(ert-deftest orgx-mode-checkbox-ctrl-c-ctrl-c-test ()
+  "C-c C-c toggles a checkbox row containing a timestamp without losing text."
+  (with-temp-buffer
+    (org-mode)
+    (let ((orgx--setup-done t)) (orgx-mode 1))
+    (insert "* Test\n- [ ] Call <2026-11-20 Fri>\n")
+    (forward-line -1)
+    (call-interactively (key-binding (kbd "C-c C-c")))
+    (should (equal (buffer-string) "* Test\n- [X] Call <2026-11-20 Fri>\n"))))
+
+(ert-deftest orgx-mode-ctrl-c-preserves-heading-with-date-test ()
+  "The Orgx timestamp hook does not replace a heading containing a date."
+  (with-temp-buffer
+    (org-mode)
+    (let ((orgx--setup-done t)) (orgx-mode 1))
+    (insert "* Meeting <2026-11-20 Fri>\n")
+    (goto-char (point-min))
+    (orgx-set-weekday-of-timestamp)
+    (should (equal (buffer-string) "* Meeting <2026-11-20 Fri>\n"))))
+
+(ert-deftest orgx-timestamp-hook-preserves-complex-timestamps-test ()
+  "The timestamp hook leaves times, repeaters, ranges and inactive dates intact."
+  (seq-do
+   (lambda (text)
+     (with-temp-buffer
+       (org-mode)
+       (insert text)
+       (goto-char (point-min))
+       (orgx-set-weekday-of-timestamp)
+       (should (equal (buffer-string) text))))
+   '("<2026-11-20 Fri 15:00 +1w>" "[2026-11-20 Fri]"
+     "<2026-11-20 Fri>--<2026-11-21 Sat>" "<2026-11-20 Fri -2d>")))
+
+(ert-deftest orgx-timestamp-hook-simple-test ()
+  "The timestamp hook still corrects a standalone date."
+  (with-temp-buffer
+    (org-mode)
+    (insert "<2026-11-20 Mon>")
+    (goto-char (point-min))
+    (orgx-set-weekday-of-timestamp)
+    (should (equal (buffer-string) "<2026-11-20 Fri>"))))
+
 (provide 'orgx-test)
 ;;; Entry utilities
 
