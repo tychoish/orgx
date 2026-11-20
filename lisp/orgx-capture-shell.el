@@ -35,6 +35,12 @@
 
 (declare-function denote-directory-files "denote")
 (declare-function denote-retrieve-filename-title "denote")
+(declare-function cape-dabbrev "cape")
+(declare-function cape-dict "cape")
+(declare-function cape-file "cape")
+(declare-function tempel-complete "tempel")
+(declare-function flyspell-mode "flyspell")
+(declare-function corfu-mode "corfu")
 
 (defgroup orgx-capture-shell nil
   "Continuous capture shell and REPL for Org mode."
@@ -151,6 +157,11 @@ or `orgx-capture-shell-command-menu'."
   :type 'boolean
   :group 'orgx-capture-shell)
 
+(defcustom orgx-capture-shell-enable-abbrev t
+  "When non-nil, enable `abbrev-mode' in `orgx-capture-shell-mode'."
+  :type 'boolean
+  :group 'orgx-capture-shell)
+
 (defvar orgx-capture-shell-undo-ring nil
   "Global list of recently captured items: ((FILE POSITION TEXT)...).")
 
@@ -177,6 +188,19 @@ or `orgx-capture-shell-command-menu'."
                            (expand-file-name orgx-capture-shell-default-file org-directory)
                          (expand-file-name orgx-capture-shell-default-file))))
         (cons base-file orgx-capture-shell-default-headline))))))
+
+(defun orgx-capture-shell--set-target (file &optional headline keep-headline)
+  "Set target FILE and optional HEADLINE, updating `default-directory'.
+If KEEP-HEADLINE is non-nil and HEADLINE is nil, keep the existing headline."
+  (when file
+    (let* ((exp (expand-file-name file))
+           (dir (file-name-directory exp)))
+      (setq orgx-capture-shell-current-file exp)
+      (unless (and keep-headline (null headline))
+        (setq orgx-capture-shell-current-headline
+              (and headline (not (string-empty-p (string-trim headline))) headline)))
+      (when (and dir (file-directory-p dir))
+        (setq default-directory (file-name-as-directory dir))))))
 
 (defvar orgx-capture-shell--buffer nil
   "The current capture shell buffer, or nil if it has been killed.")
@@ -795,9 +819,7 @@ STATUS is `ready', `success', or `error'; it defaults to `ready'."
              (when orgx-capture-shell--status (setq orgx-capture-shell--status 'error))
              (format "Error: Target file must be an Org file (.org): %s" f))
             (t
-             (setq orgx-capture-shell-current-file exp)
-             (when (and h (not (string-empty-p h)))
-               (setq orgx-capture-shell-current-headline h))
+             (orgx-capture-shell--set-target exp (and h (not (string-empty-p h)) h) t)
              (format "Target set to %s [%s]"
                      (file-name-nondirectory orgx-capture-shell-current-file)
                      (or orgx-capture-shell-current-headline "none")))))))
@@ -824,8 +846,7 @@ STATUS is `ready', `success', or `error'; it defaults to `ready'."
                                            (mapcar #'file-name-nondirectory files)
                                            nil t)))
              (when-let* ((full (seq-find (lambda (f) (string-equal (file-name-nondirectory f) choice)) files)))
-               (setq orgx-capture-shell-current-file full)
-               (setq orgx-capture-shell-current-headline nil)
+               (orgx-capture-shell--set-target full nil)
                (format "Target set to denote note: %s" choice)))
          (when orgx-capture-shell--status
            (setq orgx-capture-shell--status 'error))
@@ -905,8 +926,7 @@ Use C-j to insert a literal newline before submitting with RET."
                ((not (string-empty-p trimmed))
 		(unless orgx-capture-shell-current-file
 		  (let ((res (orgx-capture-shell--resolve-target)))
-                    (setq orgx-capture-shell-current-file (car res))
-                    (setq orgx-capture-shell-current-headline (cdr res))))
+                    (orgx-capture-shell--set-target (car res) (cdr res))))
 		(orgx-capture-shell--capture
 		 (let ((text (orgx-capture-shell--unescape-trigger trimmed)))
 		   (if (string-match ";[ \t]*\\([^\n]+\\)" text)
@@ -1137,7 +1157,10 @@ Ignores prompts, slash commands, and short syntax."
       (and
        (or (not pmark) (>= word-beg (marker-position pmark)))
        (not (eq (char-before word-beg) ?/))
-       (not (looking-at-p "/[a-zA-Z0-9_-]+"))))))
+       (not (looking-at-p "/[a-zA-Z0-9_-]+"))
+       (save-excursion
+         (skip-chars-backward "^ \t\n\r")
+         (not (eq (char-after (point)) ?/)))))))
 
 (put 'orgx-capture-shell-mode 'flyspell-mode-predicate #'orgx-capture-shell--flyspell-verify)
 
@@ -1152,10 +1175,22 @@ Ignores prompts, slash commands, and short syntax."
   (visual-line-mode 1)
   (add-hook 'completion-at-point-functions #'orgx-capture-shell-org-completion-at-point nil t)
   (add-hook 'completion-at-point-functions #'orgx-capture-shell-completion-at-point nil t)
+  (when (fboundp 'cape-dabbrev)
+    (add-hook 'completion-at-point-functions #'cape-dabbrev 80 t))
+  (let ((dict-fn (or (and (fboundp 'cape-dict) #'cape-dict)
+                     (and (fboundp 'cape-dictionary) #'cape-dictionary))))
+    (when dict-fn
+      (add-hook 'completion-at-point-functions dict-fn 85 t)))
+  (when (fboundp 'tempel-complete)
+    (add-hook 'completion-at-point-functions #'tempel-complete 90 t))
+  (when (fboundp 'cape-file)
+    (add-hook 'completion-at-point-functions #'cape-file 95 t))
   (add-hook 'kill-buffer-hook #'orgx-capture-shell--kill-completion-buffer nil t)
   (add-hook 'change-major-mode-hook #'orgx-capture-shell--kill-completion-buffer nil t)
 
-  ;; Autocomplete and spellcheck
+  ;; Autocomplete, spellcheck, and abbrevs
+  (when (and orgx-capture-shell-enable-abbrev (fboundp 'abbrev-mode))
+    (abbrev-mode 1))
   (when (and orgx-capture-shell-enable-corfu (fboundp 'corfu-mode))
     (setq-local corfu-auto t)
     (setq-local corfu-auto-prefix 1)
@@ -1167,8 +1202,7 @@ Ignores prompts, slash commands, and short syntax."
 
   ;; Resolve initial target
   (let ((target (orgx-capture-shell--resolve-target)))
-    (setq orgx-capture-shell-current-file (car target))
-    (setq orgx-capture-shell-current-headline (cdr target))))
+    (orgx-capture-shell--set-target (car target) (cdr target))))
 
 ;;; Interactive Entrypoints
 
@@ -1286,9 +1320,7 @@ window.  If it is hidden or not active, display it in the bottom popup window."
       (user-error "Target file cannot be a directory: %s" exp))
     (unless (string-suffix-p ".org" exp)
       (user-error "Target file must be an Org file (.org): %s" exp))
-    (setq orgx-capture-shell-current-file exp)
-    (setq orgx-capture-shell-current-headline
-          (and headline (not (string-empty-p (string-trim headline))) headline))
+    (orgx-capture-shell--set-target exp headline)
     (orgx-capture-shell--rename-buffer)
     (message "Target set to %s%s"
              (file-name-nondirectory orgx-capture-shell-current-file)
@@ -1320,8 +1352,7 @@ window.  If it is hidden or not active, display it in the bottom popup window."
                                       (mapcar #'file-name-nondirectory files)
                                       nil t)))
         (when-let* ((full (seq-find (lambda (f) (string-equal (file-name-nondirectory f) choice)) files)))
-          (setq orgx-capture-shell-current-file full)
-          (setq orgx-capture-shell-current-headline nil)
+          (orgx-capture-shell--set-target full nil)
           (orgx-capture-shell--rename-buffer)
           (message "Target set to denote note: %s" choice)))
     (user-error "Denote is not available")))

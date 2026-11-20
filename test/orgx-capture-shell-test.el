@@ -460,6 +460,53 @@
     (should (memq #'orgx-capture-shell-completion-at-point
                   completion-at-point-functions))))
 
+(ert-deftest orgx-capture-shell-default-directory-follows-target-test ()
+  "Buffer default-directory matches the directory of the target file."
+  (let ((tmpdir (make-temp-file "orgx-cap-dir-" t)))
+    (unwind-protect
+        (let* ((file (expand-file-name "target.org" tmpdir))
+               (orgx-capture-shell-default-file file))
+          (write-region "* Tasks\n" nil file nil 'quiet)
+          (with-temp-buffer
+            (orgx-capture-shell-mode)
+            (should (equal (file-name-as-directory (expand-file-name default-directory))
+                           (file-name-as-directory (expand-file-name tmpdir))))
+            ;; Switch to another target in different directory
+            (let* ((other-dir (make-temp-file "orgx-other-dir-" t))
+                   (other-file (expand-file-name "other.org" other-dir)))
+              (unwind-protect
+                  (progn
+                    (write-region "* Inbox\n" nil other-file nil 'quiet)
+                    (orgx-capture-shell--set-target other-file "Inbox")
+                    (should (equal (file-name-as-directory (expand-file-name default-directory))
+                                   (file-name-as-directory (expand-file-name other-dir)))))
+                (delete-directory other-dir t)))))
+      (delete-directory tmpdir t))))
+
+(ert-deftest orgx-capture-shell-abbrev-mode-test ()
+  "Abbrev mode is enabled by default in orgx-capture-shell-mode."
+  (with-temp-buffer
+    (let ((orgx-capture-shell-enable-abbrev t))
+      (orgx-capture-shell-mode)
+      (should abbrev-mode)))
+  (with-temp-buffer
+    (let ((orgx-capture-shell-enable-abbrev nil))
+      (orgx-capture-shell-mode)
+      (should-not abbrev-mode))))
+
+(ert-deftest orgx-capture-shell-text-capfs-registered-test ()
+  "Cape and tempel backends are included in completion-at-point-functions when available."
+  (cl-letf (((symbol-function 'cape-dabbrev) (lambda () nil))
+            ((symbol-function 'cape-dict) (lambda () nil))
+            ((symbol-function 'tempel-complete) (lambda () nil))
+            ((symbol-function 'cape-file) (lambda () nil)))
+    (with-temp-buffer
+      (orgx-capture-shell-mode)
+      (should (memq #'cape-dabbrev completion-at-point-functions))
+      (should (memq #'cape-dict completion-at-point-functions))
+      (should (memq #'tempel-complete completion-at-point-functions))
+      (should (memq #'cape-file completion-at-point-functions)))))
+
 ;;; Visual line mode
 
 (ert-deftest orgx-capture-shell-visual-line-mode-test ()
