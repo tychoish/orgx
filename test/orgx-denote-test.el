@@ -511,7 +511,8 @@ it is paired with)."
 
 (ert-deftest orgx-denote-store-link-non-org-test ()
   "Store a Denote link in a text buffer without invoking Org parsing."
-  (require 'denote)
+  (unless (require 'denote nil t)
+    (ert-skip "Denote is not available"))
   (let* ((denote-directory (make-temp-file "orgx-denote-link-" t))
          (file (expand-file-name "20261119T120000--note__test.md" denote-directory)))
     (unwind-protect
@@ -529,7 +530,8 @@ it is paired with)."
 
 (ert-deftest orgx-denote-store-link-org-test ()
   "Org buffers retain Denote's existing heading and custom ID behavior."
-  (require 'denote)
+  (unless (require 'denote nil t)
+    (ert-skip "Denote is not available"))
   (let* ((denote-directory (make-temp-file "orgx-denote-link-" t))
          (file (expand-file-name "20261119T120000--note__test.org" denote-directory)))
     (unwind-protect

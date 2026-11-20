@@ -80,8 +80,7 @@
                             :link (concat "denote:" identifier))
       org-store-link-plist)))
 
-(with-eval-after-load 'denote
-  (advice-add 'denote-link-ol-store :around #'orgx-denote--store-non-org-link))
+(advice-add 'denote-link-ol-store :around #'orgx-denote--store-non-org-link)
 
 ;;; File discovery and classification
 

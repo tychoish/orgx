@@ -39,7 +39,7 @@ jobs:
           elpaish: "true"
           load-paths: "lisp test"
           test-files: "test/*-test.el"
-          dependencies: "mcpkit hitl ob-go ob-rust agent-shell-queue"
+          dependencies: "mcpkit hitl ob-go ob-rust agent-shell-queue denote"
 
       - name: Measure Code Coverage
         uses: tychoish/elisp-ci/coverage@main
@@ -50,7 +50,7 @@ jobs:
           test-files: "test/*-test.el"
           report-format: "lcov"
           output-file: "coverage/lcov.info"
-          dependencies: "mcpkit hitl ob-go ob-rust agent-shell-queue"
+          dependencies: "mcpkit hitl ob-go ob-rust agent-shell-queue denote"
 
       - name: Upload Coverage to Codecov
         uses: codecov/codecov-action@v5
