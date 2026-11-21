@@ -172,6 +172,57 @@ clocks in; ADD-TODO prefixes \"TODO \" when missing."
                   :required ["heading"])
   (orgx-mcp--capture-tool args '("att" "at") "clock-in" t t))
 
+;;; Programmatic capture (skill helpers)
+
+;;;###autoload
+(defun orgx-mcp-capture-task (heading &optional body)
+  "Capture HEADING and optional BODY as a task in agentic.org.
+Same validated path as the `org_capture_task' tool, minus the TODO prefix:
+callers supply \"TODO \" themselves."
+  (orgx-mcp-capture-run (orgx-mcp-capture-target '("att" "at")) heading body))
+
+;;;###autoload
+(defun orgx-mcp-capture-journal (heading &optional body)
+  "Capture HEADING and optional BODY to today's Journal datetree in agentic.org."
+  (orgx-mcp-capture-run (orgx-mcp-capture-target '("ajj" "aj")) heading body))
+
+(defun orgx-mcp--target-file (target)
+  "Return the absolute file path in capture TARGET, or signal `user-error'.
+Resolved with `org-capture-expand-file' (relative to `org-directory'), never
+`default-directory', which an `emacsclient --eval' caller may have set
+to its own cwd."
+  (if-let* ((file (cl-find-if #'stringp target)))
+      (org-capture-expand-file file)
+    (user-error "Could not find a file path in capture target %S" target)))
+
+;;;###autoload
+(defun orgx-mcp-close-task (plan-file)
+  "Mark DONE the agentic.org TODO heading whose link points to PLAN-FILE.
+Matches on the denote ID in PLAN-FILE's name, so renaming the note does not
+break the match.  Return the agentic.org path if a heading was closed, else
+nil (already closed, or never captured)."
+  (let* ((base (file-name-nondirectory plan-file))
+         (id (and (string-match "\\([0-9]\\{8\\}T[0-9]\\{6\\}\\)" base)
+                  (match-string 1 base)))
+         (agentic-file (orgx-mcp--target-file
+                        (orgx-mcp-capture-target '("att" "at")))))
+    (unless id
+      (user-error "Could not extract a denote ID from %S" plan-file))
+    (with-current-buffer (find-file-noselect agentic-file)
+      (org-with-wide-buffer
+       (let ((closed nil))
+         (org-map-entries
+          (lambda ()
+            (when (and (not closed)
+                       (member (org-get-todo-state) (or org-not-done-keywords '("TODO")))
+                       (string-search id (org-get-heading t t t t)))
+              (org-todo "DONE")
+              (setq closed t)))
+          nil 'file)
+         (when closed
+           (save-buffer)
+           agentic-file))))))
+
 ;;; Bulk Operations
 
 (defvaralias 'orgx-mcp-agent-may-apply 'hitl-plan-agent-may-apply

@@ -81,6 +81,27 @@ Signal an error carrying the handler's error message on failure."
         (kill-buffer b))
       (delete-file f))))
 
+;; Fixture: a temp agentic.org served by the "att" template.
+(ert-deftest orgx-mcp-close-task-test ()
+  (let* ((dir (make-temp-file "orgx-close" t))
+         (f (expand-file-name "agentic.org" dir))
+         (plan "/x/20260101T101010--a-plan__plan.org")
+         (org-todo-keywords '((sequence "TODO" "|" "DONE")))
+         (org-capture-templates `(("att" "Task" entry (file ,f) ""))))
+    (unwind-protect
+        (progn
+          (with-temp-file f
+            (insert "* TODO [[denote:20260101T101010][A plan]]\n* TODO other\n"))
+          (should (equal (orgx-mcp-close-task plan) f))
+          (with-temp-buffer
+            (insert-file-contents f)
+            (should (string-match-p "^\\* DONE \\[\\[denote:20260101T101010" (buffer-string)))
+            (should (string-match-p "^\\* TODO other" (buffer-string))))
+          (should-not (orgx-mcp-close-task plan))
+          (should-error (orgx-mcp-close-task "/x/no-id.org") :type 'user-error))
+      (when-let* ((b (get-file-buffer f))) (kill-buffer b))
+      (delete-directory dir t))))
+
 (ert-deftest orgx-mcp-capture-run-clock-in-test ()
   (let ((captured nil))
     (cl-letf (((symbol-function 'org-capture)
