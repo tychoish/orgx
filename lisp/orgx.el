@@ -1178,8 +1178,26 @@ Activates `orgx-command-map' under C-c o."
         (makunbound sym))))
   (setq orgx-global--saved-settings nil))
 
+(defun orgx--setup-capture-once (&rest _)
+  "Prepare capture templates before the first capture."
+  (orgx-capture-setup-standard-templates)
+  (advice-remove 'org-capture #'orgx--setup-capture-once)
+  (advice-remove 'orgx-capture #'orgx--setup-capture-once)
+  (remove-hook 'org-capture-mode-hook #'orgx--setup-capture-once))
+
+(defun orgx--setup-agenda-once (&rest _)
+  "Prepare Denote agenda commands before the first agenda."
+  (orgx-denote-setup-agenda-commands)
+  (advice-remove 'org-agenda #'orgx--setup-agenda-once)
+  (remove-hook 'org-agenda-mode-hook #'orgx--setup-agenda-once))
+
 (defun orgx--enable-advice ()
   "Enable orgx advice and link hooks."
+  (advice-add 'org-capture :before #'orgx--setup-capture-once)
+  (advice-add 'orgx-capture :before #'orgx--setup-capture-once)
+  (advice-add 'org-agenda :before #'orgx--setup-agenda-once)
+  (add-hook 'org-capture-mode-hook #'orgx--setup-capture-once)
+  (add-hook 'org-agenda-mode-hook #'orgx--setup-agenda-once)
   (advice-add 'toc-org-insert-toc :around #'orgx--toc-bind-priorities)
   (advice-add 'toc-org-hrefify-gh :around #'orgx--toc-hrefify-priority)
   (advice-add 'org-agenda-redo :around #'orgx--ad-org-agenda-redo)
@@ -1193,6 +1211,11 @@ Activates `orgx-command-map' under C-c o."
 
 (defun orgx--disable-advice ()
   "Disable orgx advice and link hooks."
+  (advice-remove 'org-capture #'orgx--setup-capture-once)
+  (advice-remove 'orgx-capture #'orgx--setup-capture-once)
+  (advice-remove 'org-agenda #'orgx--setup-agenda-once)
+  (remove-hook 'org-capture-mode-hook #'orgx--setup-capture-once)
+  (remove-hook 'org-agenda-mode-hook #'orgx--setup-agenda-once)
   (advice-remove 'toc-org-insert-toc #'orgx--toc-bind-priorities)
   (advice-remove 'toc-org-hrefify-gh #'orgx--toc-hrefify-priority)
   (advice-remove 'org-agenda-redo #'orgx--ad-org-agenda-redo)
@@ -1204,6 +1227,12 @@ Activates `orgx-command-map' under C-c o."
   (remove-hook 'org-open-link-functions #'orgx-open-custom-id-slug-fallback)
   (orgx-refile-agent-disable))
 
+(defun orgx--setup-babel-once (&rest _)
+  "Configure Babel before an Org buffer or Babel execution first needs it."
+  (orgx-babel-setup)
+  (remove-hook 'org-mode-hook #'orgx--setup-babel-once)
+  (advice-remove 'org-babel-execute-src-block #'orgx--setup-babel-once))
+
 ;;;###autoload
 (defun orgx-setup ()
   "Centrally initialize and wire orgx features, templates, and agenda integration."
@@ -1211,13 +1240,11 @@ Activates `orgx-command-map' under C-c o."
   (orgx-global--apply-settings)
   (orgx-add-notes-to-agenda)
   (orgx--enable-advice)
-  (org-load-modules-maybe t)
-  (orgx-babel-setup)
+  (add-hook 'org-mode-hook #'orgx--setup-babel-once)
+  (advice-add 'org-babel-execute-src-block :before #'orgx--setup-babel-once)
   (add-hook 'org-mode-hook #'orgx-mode-turn-on)
   (add-hook 'org-capture-mode-hook #'orgx-mode-turn-on)
   (add-hook 'org-agenda-mode-hook #'orgx-agenda-minor-mode-turn-on)
-  (orgx-capture-setup-standard-templates)
-  (orgx-denote-setup-agenda-commands)
   (setq orgx--setup-done t)
   (run-hooks 'orgx-setup-hook))
 
@@ -1233,15 +1260,12 @@ When disabled, reverts managed configuration settings and removes hooks."
   :keymap orgx-global-mode-map
   :group 'orgx
   (if orgx-global-mode
-      (progn
-        (orgx-setup)
-        (orgx--enable-advice)
-        (add-hook 'org-mode-hook #'orgx-mode-turn-on)
-        (add-hook 'org-capture-mode-hook #'orgx-mode-turn-on)
-        (add-hook 'org-agenda-mode-hook #'orgx-agenda-minor-mode-turn-on))
+      (orgx-setup)
     (orgx--disable-advice)
     (orgx-global--revert-settings)
     (remove-hook 'org-mode-hook #'orgx-mode-turn-on)
+    (remove-hook 'org-mode-hook #'orgx--setup-babel-once)
+    (advice-remove 'org-babel-execute-src-block #'orgx--setup-babel-once)
     (remove-hook 'org-capture-mode-hook #'orgx-mode-turn-on)
     (remove-hook 'org-agenda-mode-hook #'orgx-agenda-minor-mode-turn-on)
     (setq orgx--setup-done nil)))

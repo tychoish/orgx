@@ -460,6 +460,118 @@ Other tests may leave `orgx-mode-turn-on' on the hook."
     (should (= org-agenda-default-appointment-duration 30))
     (should (null org-refile-targets))))
 
+(ert-deftest orgx-global-mode-defers-babel-and-modules-test ()
+  "Load Babel and Org modules when the first Org buffer opens."
+  (let ((org-mode-hook nil)
+        (orgx-setup-hook nil)
+        (orgx-global-mode nil)
+        (orgx--setup-done nil)
+        (babel-calls 0)
+        (module-calls 0))
+    (cl-letf (((symbol-function 'orgx-babel-setup)
+               (lambda () (setq babel-calls (1+ babel-calls))))
+              ((symbol-function 'org-load-modules-maybe)
+               (lambda (&rest _) (setq module-calls (1+ module-calls)))))
+      (unwind-protect
+          (progn
+            (orgx-global-mode 1)
+            (should (= babel-calls 0))
+            (should (= module-calls 0))
+            (with-temp-buffer (org-mode))
+            (should (= babel-calls 1))
+            (should (> module-calls 0))
+            (with-temp-buffer (org-mode))
+            (should (= babel-calls 1)))
+        (orgx-global-mode -1)))))
+
+(ert-deftest orgx-babel-deferral-covers-existing-buffer-and-retries-test ()
+  "Babel setup retries after errors in an already-open Org buffer."
+  (let ((org-mode-hook nil)
+        (orgx-setup-hook nil)
+        (orgx-global-mode nil)
+        (orgx--setup-done nil)
+        (calls 0))
+    (with-temp-buffer
+      (org-mode)
+      (cl-letf (((symbol-function 'orgx-babel-setup)
+                 (lambda ()
+                   (setq calls (1+ calls))
+                   (when (= calls 1) (error "setup failed"))))
+                ((symbol-function 'org-babel-execute-src-block) (lambda (&rest _) 'executed)))
+        (unwind-protect
+            (progn
+              (orgx-global-mode 1)
+              (should-error (org-babel-execute-src-block))
+              (should (memq #'orgx--setup-babel-once org-mode-hook))
+              (should (eq (org-babel-execute-src-block) 'executed))
+              (should (= calls 2))
+              (should-not (memq #'orgx--setup-babel-once org-mode-hook))
+              (org-babel-execute-src-block)
+              (should (= calls 2)))
+          (orgx-global-mode -1))))))
+
+(ert-deftest orgx-babel-deferral-cancelled-on-disable-test ()
+  "Disabling the mode removes both pending Babel setup paths."
+  (let ((org-mode-hook nil)
+        (orgx-setup-hook nil)
+        (orgx-global-mode nil)
+        (orgx--setup-done nil))
+    (unwind-protect
+        (progn
+          (orgx-global-mode 1)
+          (orgx-global-mode -1)
+          (should-not (memq #'orgx--setup-babel-once org-mode-hook))
+          (should-not (advice-member-p #'orgx--setup-babel-once
+                                       'org-babel-execute-src-block)))
+      (orgx-global-mode -1))))
+
+(ert-deftest orgx-global-mode-defers-capture-and-agenda-test ()
+  "Prepare capture and agenda immediately before their first invocation."
+  (let ((orgx-global-mode nil)
+        (orgx--setup-done nil)
+        (orgx-setup-hook nil)
+        (events nil))
+    (cl-letf (((symbol-function 'orgx-capture-setup-standard-templates)
+               (lambda () (push 'capture-setup events)))
+              ((symbol-function 'orgx-denote-setup-agenda-commands)
+               (lambda () (push 'agenda-setup events)))
+              ((symbol-function 'org-capture)
+               (lambda (&rest _) (push 'capture events)))
+              ((symbol-function 'org-agenda)
+               (lambda (&rest _) (push 'agenda events))))
+      (unwind-protect
+          (progn
+            (orgx-global-mode 1)
+            (should-not events)
+            (org-capture)
+            (org-capture)
+            (org-agenda)
+            (org-agenda)
+            (should (equal (reverse events)
+                           '(capture-setup capture capture agenda-setup agenda agenda))))
+        (orgx-global-mode -1)))))
+
+(ert-deftest orgx-capture-prepares-templates-before-selection-test ()
+  "The first orgx capture picker includes standard templates."
+  (require 'orgx-capture)
+  (let ((orgx-global-mode nil)
+        (orgx--setup-done nil)
+        (orgx-setup-hook nil)
+        (org-capture-templates '(("x" "existing")))
+        selected-with-standard)
+    (cl-letf (((symbol-function 'orgx-capture--select-template)
+               (lambda ()
+                 (setq selected-with-standard (assoc "t" org-capture-templates))
+                 "x"))
+              ((symbol-function 'org-capture) (lambda (&rest _) nil)))
+      (unwind-protect
+          (progn
+            (orgx-global-mode 1)
+            (should-not (assoc "t" org-capture-templates))
+            (orgx-capture)
+            (should selected-with-standard))
+        (orgx-global-mode -1)))))
+
 (ert-deftest orgx-babel-setup-test ()
   "Test that orgx-babel-setup loads all requested languages and defines aliases."
   (let ((alias-features '(ob-golang ob-elisp ob-javascript))
