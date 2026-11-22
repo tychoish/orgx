@@ -8,6 +8,7 @@
 (declare-function orgx-setup "orgx")
 (declare-function orgx--setup-babel-once "orgx")
 (declare-function orgx-mode-turn-on "orgx")
+(declare-function orgx-agenda-minor-mode-turn-on "orgx")
 (declare-function orgx--disable-advice "orgx")
 (declare-function orgx-global--revert-settings "orgx")
 (declare-function orgx-gist-export-private "orgx")
