@@ -464,6 +464,25 @@ Other tests may leave `orgx-mode-turn-on' on the hook."
     (should (= org-agenda-default-appointment-duration 30))
     (should (null org-refile-targets))))
 
+(ert-deftest orgx-global-mode-defers-while-orgx-is-loading-test ()
+  "Avoid recursively requiring Orgx when enabled from Org's load hook."
+  (let ((orgx-global-mode nil)
+        (orgx-global--initialized nil)
+        (load-in-progress t)
+        (called nil))
+    (cl-letf (((symbol-function 'featurep)
+               (let ((original (symbol-function 'featurep)))
+                 (lambda (feature &optional subfeature)
+                   (and (not (eq feature 'orgx))
+                        (funcall original feature subfeature)))))
+              ((symbol-function 'orgx-global--ensure-setup)
+               (lambda (&rest _) (setq called t))))
+      (unwind-protect
+          (progn
+            (orgx-global-mode 1)
+            (should-not called))
+        (orgx-global-mode -1)))))
+
 (ert-deftest orgx-global-mode-preserves-prior-local-setup-test ()
   "Global activation must not overwrite a prior local setup's saved values."
   (let ((org-agenda-sticky nil)
