@@ -8,6 +8,8 @@
 (require 'loaddefs-gen)
 
 (defvar denote-directory)
+(defvar org-annotate-file-storage-file)
+(defvar deft-directory)
 
 ;; orgx-loaddefs.el is a generated, gitignored convenience file (same
 ;; purpose as magit-autoloads.el / org-loaddefs.el: using the package

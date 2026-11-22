@@ -19,6 +19,7 @@
   `(let* ((orgx-bulk-directory (make-temp-file "orgx-bulk-asq-dir-" t))
           (,file-var (make-temp-file "orgx-bulk-asq-" nil ".org" ,content))
           (org-todo-keywords '((sequence "TODO" "INPROGRESS" "|" "DONE" "CANCELED")))
+          (org-agenda-files (list ,file-var))
           (hitl-plan--store (make-hash-table :test #'equal))
           (orgx-bulk-log-notes 'ignore)
           (orgx-bulk-asq-max-items 5)
