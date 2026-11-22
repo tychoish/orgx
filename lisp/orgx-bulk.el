@@ -3,7 +3,6 @@
 ;; Author: tychoish <tychoish@tychoish.com>
 ;; URL: https://github.com/tychoish/orgx
 ;; Keywords: org, convenience
-;; Package-Requires: ((emacs "29.1") (org "9.6") (hitl "0.1.0"))
 
 ;;; Commentary:
 ;; Resumable bulk operations on Org headings built on top of

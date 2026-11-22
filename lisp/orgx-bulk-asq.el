@@ -3,7 +3,6 @@
 ;; Author: tychoish <tychoish@tychoish.com>
 ;; URL: https://github.com/tychoish/orgx
 ;; Keywords: org, convenience
-;; Package-Requires: ((emacs "29.1") (org "9.6") (hitl "0.1.0") (agent-shell-queue "0.1.0"))
 
 ;;; Commentary:
 ;; Queues `org-agenda' bulk plans in `agent-shell-queue' (ASQ).

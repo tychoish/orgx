@@ -116,7 +116,7 @@ never lands after a trailing child tagged with `org-archive-tag'."
   "Recognized capture templates.")
 
 (defconst orgx-capture-shell--prompt-regexp
-  (rx bol (any "●✓✗") " [" (*? nonl) "] ❯ ")
+  (rx bol (in "●✓✗") " [" (*? nonl) "] ❯ ")
   "Regexp matching the shell prompt.")
 
 ;;; State variables (buffer-local)
