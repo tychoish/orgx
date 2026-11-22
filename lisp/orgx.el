@@ -662,88 +662,7 @@ buffer position."
 (define-obsolete-function-alias 'org-gist-export-private-gist #'orgx-gist-export-private "0.2.0")
 (define-obsolete-function-alias 'org-gist-export-public-gist #'orgx-gist-export-public "0.2.0")
 
-(defvar-keymap orgx-gist-map
-  :name "orgx-gist"
-  :doc "Gist export commands under C-c o g (orgx-mode)."
-  "p" #'orgx-gist-export-private
-  "g" #'orgx-gist-export-public)
-
-;;; Keymaps and minor modes
-
-(defvar-keymap orgx-capture-map
-  :name "orgx-capture"
-  :doc "Capture commands under C-c o c (orgx-mode).")
-
-(keymap-set orgx-capture-map "c" #'orgx-capture)
-(keymap-set orgx-capture-map "m" #'org-capture)
-(keymap-set orgx-capture-map "p" #'org-capture-goto-last-stored)
-(keymap-set orgx-capture-map "l" #'org-capture-goto-last-stored)
-(keymap-set orgx-capture-map "t" #'orgx-capture-shell-toggle)
-(keymap-set orgx-capture-map "r" #'org-capture-refile)
-(keymap-set orgx-capture-map "w" #'org-capture-refile)
-(keymap-set orgx-capture-map "s" #'orgx-capture-shell)
-(keymap-set orgx-capture-map "x" #'orgx-capture-shell-transient)
-
-(defvar-keymap orgx-archive-map
-  :name "orgx-archive"
-  :doc "Archive commands under C-c o f (orgx-mode).")
-
-(keymap-set orgx-archive-map "a" (cons "done→sibling" #'orgx-archive-done-tasks-to-archive-sibling))
-(keymap-set orgx-archive-map "e" #'org-cycle-force-archived)
-(keymap-set orgx-archive-map "f" (cons "done→file" #'orgx-archive-done-tasks-to-archive-file))
-(keymap-set orgx-archive-map "t" #'org-archive-set-tag)
-(keymap-set orgx-archive-map "s" (cons "current→sibling" #'org-archive-to-archive-sibling))
-(keymap-set orgx-archive-map "d" (cons "done+archive" #'orgx-mark-done-and-archive))
-
-(defvar-keymap orgx-bulk-map
-  :name "orgx-bulk"
-  :doc "Bulk operation commands under C-c o b (orgx-mode)."
-  "b" #'orgx-bulk-todo-state
-  "d" #'orgx-bulk-done
-  "c" #'orgx-bulk-cancel
-  "r" #'orgx-bulk-resume)
-
-(defvar-keymap orgx-link-map
-  :name "org-link"
-  :doc "Org link commands under C-c o l (orgx-mode)."
-  "s" #'org-store-link
-  "a" #'org-id-store-link
-  "i" #'org-insert-link
-  "n" #'org-annotate-file)
-
-(defvar-keymap orgx-command-map
-  :name "org"
-  :doc "Command keymap for orgx commands mounted under C-c o.")
-
-(keymap-set orgx-command-map "4" #'org-agenda)
-(keymap-set orgx-command-map "a" #'orgx-agenda-view)
-(keymap-set orgx-command-map "b" (cons "bulk" orgx-bulk-map))
-(keymap-set orgx-command-map "c" orgx-capture-map)
-(keymap-set orgx-command-map "d" #'orgx-insert-date)
-(keymap-set orgx-command-map "f" orgx-archive-map)
-(keymap-set orgx-command-map "g" orgx-gist-map)
-(keymap-set orgx-command-map "h" #'consult-org-heading)
-(keymap-set orgx-command-map "j" #'orgx-capture)
-(keymap-set orgx-command-map "k" #'org-capture)
-(keymap-set orgx-command-map "l" orgx-link-map)
-(keymap-set orgx-command-map "n" #'org-narrow-to-subtree)
-(keymap-set orgx-command-map "o" #'orgx-agenda-files-open)
-(keymap-set orgx-command-map "p" #'org-insert-property-drawer)
-(keymap-set orgx-command-map "q" #'agent-shell-queue-org-refile-from-heading)
-(keymap-set orgx-command-map "r" #'orgx-agenda-files-reload)
-(keymap-set orgx-command-map "s" #'org-save-all-org-buffers)
-(keymap-set orgx-command-map "t" #'org-set-tags-command)
-(keymap-set orgx-command-map "u" (cons "untagged-in-file" #'orgx-agenda-untagged-in-file))
-(keymap-set orgx-command-map "w" #'org-refile)
-(keymap-set orgx-command-map "/" #'orgx-agenda-for-file)
-
-(defvar-keymap orgx-mode-map
-  :doc "Buffer-local minor mode keymap activating commands under C-c o."
-  "C-c o" orgx-command-map)
-
-(defvar-keymap orgx-global-mode-map
-  :doc "Global minor mode keymap activating commands under C-c o."
-  "C-c o" orgx-command-map)
+(require 'orgx-global)
 
 (defcustom orgx-mode-managed-settings
   '((fill-column . 72)
@@ -1242,31 +1161,6 @@ Activates `orgx-command-map' under C-c o."
   (add-hook 'org-agenda-mode-hook #'orgx-agenda-minor-mode-turn-on)
   (setq orgx--setup-done t)
   (run-hooks 'orgx-setup-hook))
-
-;;;###autoload
-(define-minor-mode orgx-global-mode
-  "Global mode for orgx.
-When enabled, runs `orgx-setup', activates `orgx-global-mode-map'
-\(with `C-c o'), and automatically enables `orgx-mode' in `org-mode'
-and `org-capture-mode' buffers, and `orgx-agenda-minor-mode' in
-`org-agenda-mode' buffers.
-When disabled, reverts managed configuration settings and removes hooks."
-  :global t
-  :keymap orgx-global-mode-map
-  :group 'orgx
-  (if orgx-global-mode
-      (orgx-setup)
-    (orgx--disable-advice)
-    (orgx-global--revert-settings)
-    (remove-hook 'org-mode-hook #'orgx-mode-turn-on)
-    (remove-hook 'org-mode-hook #'orgx--setup-babel-once)
-    (advice-remove 'org-babel-execute-src-block #'orgx--setup-babel-once)
-    (remove-hook 'org-capture-mode-hook #'orgx-mode-turn-on)
-    (remove-hook 'org-agenda-mode-hook #'orgx-agenda-minor-mode-turn-on)
-    (setq orgx--setup-done nil)))
-
-;;;###autoload
-(defalias 'orgx-global-minor-mode #'orgx-global-mode)
 
 ;;; Generic entry utilities
 

@@ -452,7 +452,9 @@ Other tests may leave `orgx-mode-turn-on' on the hook."
   "Test that disabling orgx-global-mode reverts managed settings."
   (let ((org-agenda-sticky nil)
         (org-agenda-default-appointment-duration 30)
-        (org-refile-targets nil))
+        (org-refile-targets nil)
+        (orgx--setup-done nil)
+        (orgx-global--saved-settings nil))
     (orgx-global-mode 1)
     (should (eq org-agenda-sticky t))
     (should (= org-agenda-default-appointment-duration 60))
@@ -461,6 +463,48 @@ Other tests may leave `orgx-mode-turn-on' on the hook."
     (should (eq org-agenda-sticky nil))
     (should (= org-agenda-default-appointment-duration 30))
     (should (null org-refile-targets))))
+
+(ert-deftest orgx-global-mode-preserves-prior-local-setup-test ()
+  "Global activation must not overwrite a prior local setup's saved values."
+  (let ((org-agenda-sticky nil)
+        (orgx--setup-done nil)
+        (orgx-global--initialized nil)
+        (orgx-global--saved-settings nil)
+        (orgx-global-mode nil))
+    (unwind-protect
+        (progn
+          (orgx-setup)
+          (should org-agenda-sticky)
+          (orgx-global-mode 1)
+          (orgx-global-mode -1)
+          (should-not org-agenda-sticky))
+      (orgx-global-mode -1))))
+
+(ert-deftest orgx-global-first-capture-prepares-templates-test ()
+  "The first capture initializes templates before selecting one."
+  (let ((orgx-global--initialized nil)
+        (orgx--setup-done nil)
+        (prepared nil))
+    (cl-letf (((symbol-function 'orgx-setup)
+               (lambda () (setq orgx--setup-done t)))
+              ((symbol-function 'orgx--setup-capture-once)
+               (lambda () (setq prepared t))))
+      (orgx-global--before-capture)
+      (should orgx-global--initialized)
+      (should prepared))))
+
+(ert-deftest orgx-global-first-agenda-prepares-commands-test ()
+  "The first agenda initializes custom commands before selection."
+  (let ((orgx-global--initialized nil)
+        (orgx--setup-done nil)
+        (prepared nil))
+    (cl-letf (((symbol-function 'orgx-setup)
+               (lambda () (setq orgx--setup-done t)))
+              ((symbol-function 'orgx--setup-agenda-once)
+               (lambda () (setq prepared t))))
+      (orgx-global--before-agenda)
+      (should orgx-global--initialized)
+      (should prepared))))
 
 (ert-deftest orgx-global-mode-defers-babel-and-modules-test ()
   "Load Babel and Org modules when the first Org buffer opens."
