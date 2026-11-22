@@ -173,16 +173,13 @@ insert an inactive date-time stamp `[YYYY-MM-DD Day HH:MM]'."
 (defvar orgx-user-org-directories nil
   "Additional directories that may contain org files.")
 
-(defvar deft-directory)
-(defvar denote-directory)
 (defvar org-annotate-file-storage-file)
 
 ;;;###autoload
 (defun orgx-set-notes-directory (&optional path)
   "Set the notes directory to PATH and update Org paths.
 If PATH is nil, use `orgx-local-notes-directory'.
-Updates `orgx-local-notes-directory', `org-directory',
-`org-annotate-file-storage-file', `deft-directory', and `denote-directory'."
+Updates `orgx-local-notes-directory' and the associated Org paths."
   (interactive
    (list (read-directory-name "Notes directory: " (or orgx-local-notes-directory "~/notes"))))
   (when path
@@ -195,8 +192,6 @@ Updates `orgx-local-notes-directory', `org-directory',
   (setq org-annotate-file-storage-file (file-name-concat org-directory "records.org"))
   (setq org-default-notes-file (file-name-concat org-directory "records.org"))
   (setq org-archive-location (file-name-concat org-directory "archive/%s::datetree/"))
-  (setq deft-directory (file-name-concat orgx-local-notes-directory "deft"))
-  (setq denote-directory (file-name-concat orgx-local-notes-directory "denote"))
   orgx-local-notes-directory)
 
 ;;;###autoload
