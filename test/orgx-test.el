@@ -516,14 +516,56 @@ Other tests may leave `orgx-mode-turn-on' on the hook."
   "The first agenda initializes custom commands before selection."
   (let ((orgx-global--initialized nil)
         (orgx--setup-done nil)
-        (prepared nil))
+        (prepared nil)
+        (modules nil))
     (cl-letf (((symbol-function 'orgx-setup)
                (lambda () (setq orgx--setup-done t)))
+              ((symbol-function 'orgx--setup-modules-once)
+               (lambda () (setq modules t)))
               ((symbol-function 'orgx--setup-agenda-once)
-               (lambda () (setq prepared t))))
+               (lambda () (setq prepared modules))))
       (orgx-global--before-agenda)
       (should orgx-global--initialized)
       (should prepared))))
+
+(ert-deftest orgx-first-org-buffer-loads-configured-modules-test ()
+  "Load configured modules even if Org ran its initial module pass first."
+  (let ((orgx-global-mode t)
+        (orgx-global--initialized nil)
+        (orgx--setup-done nil)
+        (orgx-global--saved-settings nil)
+        (org-mode-hook nil)
+        (features (delq 'org-habit (copy-sequence features)))
+        (org-modules-loaded t))
+    (cl-letf (((symbol-function 'orgx--setup-babel-once) #'ignore)
+              ((symbol-function 'orgx-mode-turn-on) #'ignore))
+      (unwind-protect
+          (with-temp-buffer
+            (orgx-global--org-mode-setup)
+            (should (featurep 'org-habit)))
+        (orgx-global-mode -1)))))
+
+(ert-deftest orgx-module-setup-retries-after-error-test ()
+  "Keep module setup pending after an error and clear it after success."
+  (let ((org-mode-hook nil)
+        (calls 0))
+    (cl-letf (((symbol-function 'org-load-modules-maybe)
+               (lambda (&rest _)
+                 (setq calls (1+ calls))
+                 (when (= calls 1) (error "module load failed")))))
+      (unwind-protect
+          (progn
+            (add-hook 'org-mode-hook #'orgx--setup-modules-once)
+            (advice-add 'org-agenda :before #'orgx--setup-modules-once)
+            (should-error (orgx--setup-modules-once))
+            (should (memq #'orgx--setup-modules-once org-mode-hook))
+            (should (advice-member-p #'orgx--setup-modules-once 'org-agenda))
+            (orgx--setup-modules-once)
+            (should (= calls 2))
+            (should-not (memq #'orgx--setup-modules-once org-mode-hook))
+            (should-not (advice-member-p #'orgx--setup-modules-once 'org-agenda)))
+        (remove-hook 'org-mode-hook #'orgx--setup-modules-once)
+        (advice-remove 'org-agenda #'orgx--setup-modules-once)))))
 
 (ert-deftest orgx-global-mode-defers-babel-and-modules-test ()
   "Load Babel and Org modules when the first Org buffer opens."
@@ -586,6 +628,8 @@ Other tests may leave `orgx-mode-turn-on' on the hook."
           (orgx-global-mode 1)
           (orgx-global-mode -1)
           (should-not (memq #'orgx--setup-babel-once org-mode-hook))
+          (should-not (memq #'orgx--setup-modules-once org-mode-hook))
+          (should-not (advice-member-p #'orgx--setup-modules-once 'org-agenda))
           (should-not (advice-member-p #'orgx--setup-babel-once
                                        'org-babel-execute-src-block)))
       (orgx-global-mode -1))))

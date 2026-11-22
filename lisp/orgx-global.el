@@ -7,6 +7,7 @@
 
 (declare-function orgx-setup "orgx")
 (declare-function orgx--setup-babel-once "orgx")
+(declare-function orgx--setup-modules-once "orgx")
 (declare-function orgx-mode-turn-on "orgx")
 (declare-function orgx-agenda-minor-mode-turn-on "orgx")
 (declare-function orgx--disable-advice "orgx")
@@ -161,6 +162,7 @@
   "Initialize Orgx for the first Org buffer."
   (unless orgx-global--initialized
     (orgx-global--ensure-setup)
+    (orgx--setup-modules-once)
     (orgx--setup-babel-once)
     (orgx-mode-turn-on)))
 
@@ -176,6 +178,7 @@
   "Prepare the first agenda when it triggers Orgx initialization."
   (unless orgx-global--initialized
     (orgx-global--ensure-setup)
+    (orgx--setup-modules-once)
     (orgx--setup-agenda-once))
   (advice-remove 'org-agenda #'orgx-global--before-agenda))
 
@@ -201,6 +204,8 @@
       (orgx--disable-advice)
       (orgx-global--revert-settings)
       (remove-hook 'org-mode-hook #'orgx-mode-turn-on)
+      (remove-hook 'org-mode-hook #'orgx--setup-modules-once)
+      (advice-remove 'org-agenda #'orgx--setup-modules-once)
       (remove-hook 'org-mode-hook #'orgx--setup-babel-once)
       (advice-remove 'org-babel-execute-src-block #'orgx--setup-babel-once)
       (remove-hook 'org-capture-mode-hook #'orgx-mode-turn-on)

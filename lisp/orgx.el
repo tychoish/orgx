@@ -1141,6 +1141,12 @@ Activates `orgx-command-map' under C-c o."
   (remove-hook 'org-open-link-functions #'orgx-open-custom-id-slug-fallback)
   (orgx-refile-agent-disable))
 
+(defun orgx--setup-modules-once (&rest _)
+  "Load configured Org modules on the first Org buffer or agenda."
+  (org-load-modules-maybe t)
+  (remove-hook 'org-mode-hook #'orgx--setup-modules-once)
+  (advice-remove 'org-agenda #'orgx--setup-modules-once))
+
 (defun orgx--setup-babel-once (&rest _)
   "Configure Babel before an Org buffer or Babel execution first needs it."
   (orgx-babel-setup)
@@ -1154,6 +1160,8 @@ Activates `orgx-command-map' under C-c o."
   (orgx-global--apply-settings)
   (orgx-add-notes-to-agenda)
   (orgx--enable-advice)
+  (add-hook 'org-mode-hook #'orgx--setup-modules-once)
+  (advice-add 'org-agenda :before #'orgx--setup-modules-once)
   (add-hook 'org-mode-hook #'orgx--setup-babel-once)
   (advice-add 'org-babel-execute-src-block :before #'orgx--setup-babel-once)
   (add-hook 'org-mode-hook #'orgx-mode-turn-on)
