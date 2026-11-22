@@ -32,6 +32,8 @@ jobs:
           load-paths: "lisp"
           target-files: "lisp/*.el"
           dependencies: "mcpkit hitl agent-shell-queue"
+          linters: "byte-compile checkdoc package-lint"
+          required-linters: "byte-compile checkdoc package-lint"
 
       - name: Run ERT Tests
         uses: tychoish/elisp-ci@main

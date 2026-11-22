@@ -163,41 +163,39 @@ insert an inactive date-time stamp `[YYYY-MM-DD Day HH:MM]'."
 
 ;;; Agenda file management
 
-(defvar local-notes-directory nil
+(defvar orgx-local-notes-directory nil
   "Directory where notes (org, roam, deft, etc.) are stored.")
+(define-obsolete-variable-alias 'local-notes-directory 'orgx-local-notes-directory "0.2.0")
 
-(defvar user-org-directories nil
+(defvar orgx-user-org-directories nil
   "Additional directories that may contain org files.")
+(define-obsolete-variable-alias 'user-org-directories 'orgx-user-org-directories "0.2.0")
 
-(defvar deft-directory nil
-  "Directory for deft notes.")
-
+(defvar deft-directory)
 (defvar denote-directory)
-
-(defvar org-annotate-file-storage-file nil
-  "File for org-annotate-file storage.")
+(defvar org-annotate-file-storage-file)
 
 ;;;###autoload
 (defun orgx-set-notes-directory (&optional path)
   "Set the notes directory to PATH and update Org paths.
-If PATH is nil, use `local-notes-directory'.
-Updates `local-notes-directory', `org-directory',
+If PATH is nil, use `orgx-local-notes-directory'.
+Updates `orgx-local-notes-directory', `org-directory',
 `org-annotate-file-storage-file', `deft-directory', and `denote-directory'."
   (interactive
-   (list (read-directory-name "Notes directory: " (or local-notes-directory "~/notes"))))
+   (list (read-directory-name "Notes directory: " (or orgx-local-notes-directory "~/notes"))))
   (when path
-    (setq local-notes-directory (expand-file-name path)))
+    (setq orgx-local-notes-directory (expand-file-name path)))
 
-  (unless local-notes-directory
-    (error "Must define `local-notes-directory'"))
+  (unless orgx-local-notes-directory
+    (error "Must define `orgx-local-notes-directory'"))
 
-  (setq org-directory (file-name-concat local-notes-directory "org"))
+  (setq org-directory (file-name-concat orgx-local-notes-directory "org"))
   (setq org-annotate-file-storage-file (file-name-concat org-directory "records.org"))
   (setq org-default-notes-file (file-name-concat org-directory "records.org"))
   (setq org-archive-location (file-name-concat org-directory "archive/%s::datetree/"))
-  (setq deft-directory (file-name-concat local-notes-directory "deft"))
-  (setq denote-directory (file-name-concat local-notes-directory "denote"))
-  local-notes-directory)
+  (setq deft-directory (file-name-concat orgx-local-notes-directory "deft"))
+  (setq denote-directory (file-name-concat orgx-local-notes-directory "denote"))
+  orgx-local-notes-directory)
 
 ;;;###autoload
 (defun orgx-add-notes-to-agenda ()
@@ -664,8 +662,8 @@ buffer position."
   (interactive)
   (org-gist-export-to-gist 'public))
 
-(defalias 'org-gist-export-private-gist #'orgx-gist-export-private)
-(defalias 'org-gist-export-public-gist #'orgx-gist-export-public)
+(define-obsolete-function-alias 'org-gist-export-private-gist #'orgx-gist-export-private "0.2.0")
+(define-obsolete-function-alias 'org-gist-export-public-gist #'orgx-gist-export-public "0.2.0")
 
 (defvar-keymap orgx-gist-map
   :name "orgx-gist"
