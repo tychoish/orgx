@@ -163,13 +163,15 @@ insert an inactive date-time stamp `[YYYY-MM-DD Day HH:MM]'."
 
 ;;; Agenda file management
 
+(define-obsolete-variable-alias 'local-notes-directory 'orgx-local-notes-directory "0.2.0")
+
 (defvar orgx-local-notes-directory nil
   "Directory where notes (org, roam, deft, etc.) are stored.")
-(define-obsolete-variable-alias 'local-notes-directory 'orgx-local-notes-directory "0.2.0")
+
+(define-obsolete-variable-alias 'user-org-directories 'orgx-user-org-directories "0.2.0")
 
 (defvar orgx-user-org-directories nil
   "Additional directories that may contain org files.")
-(define-obsolete-variable-alias 'user-org-directories 'orgx-user-org-directories "0.2.0")
 
 (defvar deft-directory)
 (defvar denote-directory)
