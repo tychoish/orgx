@@ -1504,23 +1504,23 @@ When TEMPLATE specifies a target file in `org-capture-templates' and
                                     template
                                     (string-join (orgx-capture-shell--template-keys) ", "))))))
     (setq orgx-capture-shell-current-template canonical)
-    (when-let* ((_ orgx-capture-shell-sync-target-on-template)
-                (entry (orgx-capture-shell--find-template canonical))
-                (target (nth 3 entry)))
-      (when (consp target)
-        (let* ((type (car target))
-               (raw-file (cadr target))
-               (file (and (stringp raw-file)
-                          (expand-file-name raw-file (or (bound-and-true-p org-directory)
-                                                         default-directory))))
-               (headline (pcase type
-                           ('file+headline (nth 2 target))
-                           ('file+olp (string-join (nthcdr 2 target)
-                                                  orgx-capture-shell-headline-separator))
-                           ('file+olp+datetree (nth 2 target))
-                           (_ nil))))
-          (when file
-            (orgx-capture-shell--set-target file headline t)))))
+    (when orgx-capture-shell-sync-target-on-template
+      (when-let* ((entry (orgx-capture-shell--find-template canonical))
+                  (target (nth 3 entry)))
+        (when (consp target)
+          (let* ((type (car target))
+                 (raw-file (cadr target))
+                 (file (and (stringp raw-file)
+                            (expand-file-name raw-file (or (bound-and-true-p org-directory)
+                                                           default-directory))))
+                 (headline (pcase type
+                             ('file+headline (nth 2 target))
+                             ('file+olp (string-join (nthcdr 2 target)
+                                                    orgx-capture-shell-headline-separator))
+                             ('file+olp+datetree (nth 2 target))
+                             (_ nil))))
+            (when file
+              (orgx-capture-shell--set-target file headline t))))))
     (orgx-capture-shell--rename-buffer)
     (message "Template set to %s%s"
              canonical
