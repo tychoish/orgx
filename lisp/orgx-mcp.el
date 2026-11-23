@@ -429,7 +429,7 @@ KEYS are the required string arguments.  FILE must be allowed (see
   "Convert ENTRY plist from `orgx-entry-get' into a JSON-safe plist for FILE."
   (let ((ht (make-hash-table :test #'equal)))
     (dolist (pair (plist-get entry :properties))
-      (puthash (car pair) (cdr pair) ht))
+      (setf (map-elt ht (car pair)) (cdr pair)))
     (list :file file
           :heading (or (plist-get entry :heading) "")
           :todo (plist-get entry :todo)
