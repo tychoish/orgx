@@ -10,6 +10,7 @@
 (defvar denote-directory)
 (defvar org-annotate-file-storage-file)
 (defvar deft-directory)
+(declare-function orgx-capture-shell-execute-command "orgx-capture-shell")
 
 ;; orgx-loaddefs.el is a generated, gitignored convenience file (same
 ;; purpose as magit-autoloads.el / org-loaddefs.el: using the package
@@ -401,6 +402,8 @@ Other tests may leave `orgx-mode-turn-on' on the hook."
   (should (eq #'orgx-agenda-for-file (keymap-lookup orgx-command-map "/")))
   (should (eq #'orgx-capture-shell-toggle (keymap-lookup orgx-command-map "c t")))
   (should (eq #'orgx-capture-shell-transient (keymap-lookup orgx-command-map "c x")))
+  (should (eq #'orgx-capture-shell-transient (keymap-lookup orgx-command-map "m")))
+  (should (eq #'orgx-capture-shell-execute-command (keymap-lookup orgx-command-map "x")))
   (should (eq #'orgx-bulk-todo-state (keymap-lookup orgx-command-map "b b")))
   (should (eq #'orgx-bulk-done (keymap-lookup orgx-command-map "b d")))
   (should (eq #'orgx-bulk-cancel (keymap-lookup orgx-command-map "b c")))

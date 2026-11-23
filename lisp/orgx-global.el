@@ -18,6 +18,7 @@
 (declare-function orgx-capture-shell "orgx-capture-shell")
 (declare-function orgx-capture-shell-toggle "orgx-capture-shell")
 (declare-function orgx-capture-shell-transient "orgx-capture-shell")
+(declare-function orgx-capture-shell-execute-command "orgx-capture-shell")
 (declare-function orgx-archive-done-tasks-to-archive-sibling "orgx")
 (declare-function orgx-archive-done-tasks-to-archive-file "orgx")
 (declare-function orgx-mark-done-and-archive "orgx")
@@ -50,6 +51,8 @@
 (declare-function org-refile "org-refile")
 (autoload 'orgx-gist-export-private "orgx" nil t)
 (autoload 'orgx-gist-export-public "orgx" nil t)
+(autoload 'orgx-capture-shell-transient "orgx-capture-shell" nil t)
+(autoload 'orgx-capture-shell-execute-command "orgx-capture-shell" nil t)
 (autoload 'org-annotate-file "org-annotate-file" nil t)
 (autoload 'org-cycle-force-archived "org-cycle" nil t)
 (autoload 'org-archive-set-tag "org-archive" nil t)
@@ -131,6 +134,7 @@
 (keymap-set orgx-command-map "j" #'orgx-capture)
 (keymap-set orgx-command-map "k" #'org-capture)
 (keymap-set orgx-command-map "l" orgx-link-map)
+(keymap-set orgx-command-map "m" #'orgx-capture-shell-transient)
 (keymap-set orgx-command-map "n" #'org-narrow-to-subtree)
 (keymap-set orgx-command-map "o" #'orgx-agenda-files-open)
 (keymap-set orgx-command-map "p" #'org-insert-property-drawer)
@@ -140,6 +144,7 @@
 (keymap-set orgx-command-map "t" #'org-set-tags-command)
 (keymap-set orgx-command-map "u" (cons "untagged-in-file" #'orgx-agenda-untagged-in-file))
 (keymap-set orgx-command-map "w" #'org-refile)
+(keymap-set orgx-command-map "x" #'orgx-capture-shell-execute-command)
 (keymap-set orgx-command-map "/" #'orgx-agenda-for-file)
 
 (defvar-keymap orgx-mode-map

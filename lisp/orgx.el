@@ -67,6 +67,7 @@
 (declare-function orgx-capture-shell "orgx-capture-shell")
 (declare-function orgx-capture-shell-toggle "orgx-capture-shell")
 (declare-function orgx-capture-shell-transient "orgx-capture-shell")
+(declare-function orgx-capture-shell-execute-command "orgx-capture-shell")
 (declare-function denote-convert-subtree "denote-convert")
 (declare-function orgx-denote-agenda-todos "orgx-denote")
 (declare-function orgx-denote-agenda-questions "orgx-denote")
