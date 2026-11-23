@@ -10,8 +10,11 @@ The Orgx Capture Shell (=orgx-capture-shell.el=) provides a continuous, non-moda
    - Key: =C-c o c t= (toggle) or =C-c o c s=
    - Command: ~M-x orgx-capture-shell-toggle~
 2. Open the transient menu:
-   - Key: =C-c o c x=
+   - Key: =C-c o m= (primary) or =C-c o c x=
    - Command: ~M-x orgx-capture-shell-transient~
+3. Execute capture-shell commands via filtered palette:
+   - Key: =C-c o x=
+   - Command: ~M-x orgx-capture-shell-execute-command~
 
 * Architecture & Features
 
@@ -35,7 +38,7 @@ If no directory pattern matches, it falls back to ~orgx-capture-shell-default-fi
 ** 3. Slash Commands
 Within the REPL buffer, slash commands allow dynamic reconfiguration:
 - =/target [file[:headline]]= :: Switch target file and headline on the fly.
-- =/template [task|note|journal|plain]= :: Switch active template formatting.
+- =/template [name|key]= :: Switch active template formatting. Accepts builtin types (=task=, =note=, =journal=, =plain=) or any key from =org-capture-templates= (e.g. =tq=, =tt=, =atq=, =jj=). When a capture template with a concrete file target is activated, automatically aligns the active target file and headline (customizable via ~orgx-capture-shell-sync-target-on-template~).
 - =/denote= :: Interactively pick a Denote note as the capture target.
 - =/undo= :: Roll back the most recently captured item.
 - =/recent= or =/list= :: List recently captured items in the session.

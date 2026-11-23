@@ -8,6 +8,11 @@
 (require 'org-agenda)
 (require 'orgx-capture-shell)
 
+(defvar orgx-capture-shell-sync-target-on-template)
+(declare-function orgx-capture-shell--interpolate-template "orgx-capture-shell" (template-str text))
+(declare-function orgx-capture-shell--find-template "orgx-capture-shell" (key-or-sym))
+(declare-function orgx-capture-shell--template-keys "orgx-capture-shell" ())
+
 (ert-deftest orgx-capture-shell-target-resolution-test ()
   "Test directory-based target cascading."
   (let ((orgx-capture-shell-target-directory-alist
@@ -1250,6 +1255,81 @@
           (should-not (buffer-live-p shadow)))
       (when (buffer-live-p shell) (kill-buffer shell))
       (delete-directory dir t))))
+
+(ert-deftest orgx-capture-shell-template-interpolation-test ()
+  "Test non-modal template string interpolation."
+  ;; Basic title and cursor placeholder
+  (should (equal (orgx-capture-shell--interpolate-template "* TODO %?" "Ship release")
+                 "* TODO Ship release"))
+  ;; Explicit prompt %(orgx-capture--read-title)
+  (should (equal (orgx-capture-shell--interpolate-template "* TODO %(orgx-capture--read-title)\n%i%?" "Fix issue")
+                 "* TODO Fix issue"))
+  ;; %^{Prompt} syntax
+  (should (equal (orgx-capture-shell--interpolate-template "* %^{Task title} :work:" "Draft spec")
+                 "* Draft spec :work:"))
+  ;; %<FORMAT> timestamp
+  (let ((res (orgx-capture-shell--interpolate-template "* %(orgx-capture--read-title) <%<%Y-%m-%d>>" "Standup")))
+    (should (string-match-p "\\* Standup <[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}>" res)))
+  ;; %T active timestamp
+  (let ((res (orgx-capture-shell--interpolate-template "* %? %T" "Meeting")))
+    (should (string-match-p "\\* Meeting <[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\} [A-Za-z]+ [0-9]\\{2\\}:[0-9]\\{2\\}>" res))))
+
+(ert-deftest orgx-capture-shell-org-capture-templates-integration-test ()
+  "Test integration with `org-capture-templates'."
+  (let ((org-capture-templates
+         '(("t" "tasks")
+           ("xt" "custom task" entry
+            (file+headline "/tmp/custom.org" "Backlog")
+            "* TODO %(orgx-capture--read-title) :tag:\n%i%?"
+            :prepend t)
+           ("xj" "custom journal" entry
+            (file "/tmp/custom-journal.org")
+            "* %(orgx-capture--read-title) <%<%Y-%m-%d %H:%M>>\n%?"
+            :prepend nil))))
+    ;; Discovery
+    (should (orgx-capture-shell--find-template "xt"))
+    (should (member "xt" (orgx-capture-shell--template-keys)))
+    (should (member "task" (orgx-capture-shell--template-keys)))
+    ;; Formatting through format-entry
+    (should (equal (orgx-capture-shell--format-entry "Deploy backend" "xt")
+                   "* TODO Deploy backend :tag:"))
+    ;; Prepend resolution
+    (should (eq (orgx-capture-shell--resolve-prepend "xt") t))
+    (should (eq (orgx-capture-shell--resolve-prepend "xj") nil))))
+
+(ert-deftest orgx-capture-shell-set-template-target-sync-test ()
+  "Test that activating a template with a file target auto-aligns target state."
+  (let ((org-capture-templates
+         '(("xt" "custom task" entry
+            (file+headline "/tmp/sync-test.org" "Tasks")
+            "* TODO %?"
+            :prepend t)))
+        (orgx-capture-shell-sync-target-on-template t))
+    (with-temp-buffer
+      (orgx-capture-shell-mode)
+      (setq orgx-capture-shell-current-file "/tmp/initial.org")
+      (setq orgx-capture-shell-current-headline "Old")
+      (orgx-capture-shell-set-template "xt")
+      (should (equal orgx-capture-shell-current-template "xt"))
+      (should (equal orgx-capture-shell-current-file (expand-file-name "/tmp/sync-test.org")))
+      (should (equal orgx-capture-shell-current-headline "Tasks"))
+      ;; Switch via slash command
+      (let ((msg (orgx-capture-shell--execute-slash-command "/template xt")))
+        (should (string-match-p "Template switched to: xt" msg)))
+      ;; Invalid template error handling in slash command
+      (let ((msg (orgx-capture-shell--execute-slash-command "/template nosuchtemplate")))
+        (should (string-match-p "Unknown template: nosuchtemplate" msg))))))
+
+(ert-deftest orgx-capture-shell-capf-template-keys-test ()
+  "Test completion-at-point for /template includes capture template keys."
+  (let ((org-capture-templates
+         '(("xt" "custom task" entry (file "/tmp/f.org") "* TODO %?"))))
+    (orgx-capture-shell-test--with-shell "/template "
+      (let ((candidates (orgx-capture-shell-test--capf-candidates)))
+        (should candidates)
+        (should (member "xt" (cdr candidates)))
+        (should (member "task" (cdr candidates)))
+        (should (member "journal" (cdr candidates)))))))
 
 (provide 'orgx-capture-shell-test)
 ;;; orgx-capture-shell-test.el ends here

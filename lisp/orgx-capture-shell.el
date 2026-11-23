@@ -27,6 +27,7 @@
 (require 'button)
 (require 'seq)
 (require 'subr-x)
+(require 'map)
 (require 'org)
 (require 'transient)
 
@@ -112,6 +113,13 @@ never lands after a trailing child tagged with `org-archive-tag'."
                  (const :tag "Always append" nil))
   :group 'orgx-capture-shell)
 
+(defcustom orgx-capture-shell-sync-target-on-template t
+  "When non-nil, activating a capture template with a concrete target file
+automatically updates `orgx-capture-shell-current-file' and
+`orgx-capture-shell-current-headline'."
+  :type 'boolean
+  :group 'orgx-capture-shell)
+
 (defconst orgx-capture-shell-templates '(task note journal plain)
   "Recognized capture templates.")
 
@@ -128,7 +136,8 @@ never lands after a trailing child tagged with `org-archive-tag'."
   "Current target headline within `orgx-capture-shell-current-file'.")
 
 (defvar-local orgx-capture-shell-current-template 'task
-  "Current active template type: \\='task, \\='note, \\='journal, or \\='plain.")
+  "Current active template: a built-in symbol (`task', `note', `journal', `plain')
+or an `org-capture-templates' key string (e.g. \"tq\", \"tt\", \"atq\").")
 
 (defcustom orgx-capture-shell-undo-ring-max 50
   "Maximum number of captured items to retain in `orgx-capture-shell-undo-ring'."
@@ -265,23 +274,134 @@ Only split when the frame has exactly two side-by-side ordinary windows."
 (defconst orgx-capture-shell--heading-line-regexp "\\`\\(\\*+\\) "
   "Regexp matching an Org heading line, capturing the stars.")
 
+(defun orgx-capture-shell--find-template (key-or-sym)
+  "Return the `org-capture-templates' entry matching KEY-OR-SYM, or nil."
+  (when (and key-or-sym (boundp 'org-capture-templates))
+    (let ((key (if (symbolp key-or-sym) (symbol-name key-or-sym) key-or-sym)))
+      (seq-find (lambda (entry)
+                  (and (consp entry) (>= (length entry) 5)
+                       (string-equal (car entry) key)))
+                org-capture-templates))))
+
+(defun orgx-capture-shell--template-keys ()
+  "Return a list of all known template key strings and symbols."
+  (let ((keys (mapcar #'symbol-name orgx-capture-shell-templates)))
+    (when (boundp 'org-capture-templates)
+      (dolist (tpl org-capture-templates)
+        (when (and (consp tpl) (>= (length tpl) 5) (stringp (car tpl)))
+          (push (car tpl) keys))))
+    (nreverse (delete-dups keys))))
+
+(defun orgx-capture-shell--available-templates ()
+  "Return an alist of available templates for selection.
+Each element is of the form: (LABEL VALUE ANNOTATION GROUP)."
+  (let* ((prefix-map (and (boundp 'org-capture-templates)
+                          (map-into
+                           (seq-map (lambda (it) (cons (nth 0 it) (nth 1 it)))
+                                    (seq-filter (lambda (it) (<= (length it) 4))
+                                                org-capture-templates))
+                           '(hash-table :test equal))))
+         items)
+    (dolist (sym orgx-capture-shell-templates)
+      (let ((name (symbol-name sym)))
+        (push (list name
+                    sym
+                    (format "[builtin] Generic %s template" name)
+                    "Generic")
+              items)))
+    (when (boundp 'org-capture-templates)
+      (dolist (tpl (seq-filter (lambda (it) (< 4 (length it))) org-capture-templates))
+        (let* ((key-char (nth 0 tpl))
+               (description (nth 1 tpl))
+               (target (nth 3 tpl))
+               (target-loc (and (consp target) (cadr target)))
+               (target-file (if (stringp target-loc) (file-name-nondirectory target-loc) ""))
+               (content (nth 4 tpl))
+               (raw (if (stringp content) (string-replace "\n" " " content) ""))
+               (preview (if (> (length raw) 32) (concat (substring raw 0 29) "...") raw))
+               (group (cond
+                       ((not (string-empty-p target-file)) target-file)
+                       ((and prefix-map (map-elt prefix-map (substring key-char 0 1))))
+                       (t "Other")))
+               (label (format "%s (%s)" description key-char)))
+          (push (list label
+                      key-char
+                      (format "[%s] <%s> '%s'" key-char target-file preview)
+                      group)
+                items))))
+    (nreverse items)))
+
+(defun orgx-capture-shell--interpolate-template (template-str text)
+  "Interpolate TEXT into Org capture TEMPLATE-STR non-modally."
+  (let* ((res template-str)
+         (title (string-trim text))
+         (title-inserted nil))
+    ;; 1. Expand title prompts if present
+    (when (string-match-p "%(orgx-capture--read-title)" res)
+      (setq res (replace-regexp-in-string "%(orgx-capture--read-title)" (lambda (_) title) res t t))
+      (setq title-inserted t))
+    (when (string-match-p "%\\^{[^}]*}" res)
+      (setq res (replace-regexp-in-string "%\\^{[^}]*}" (lambda (_) title) res t t))
+      (setq title-inserted t))
+    ;; 2. If title wasn't consumed by explicit prompt, place it at %?
+    (if title-inserted
+        (setq res (replace-regexp-in-string "%\\?" "" res t t))
+      (if (string-match-p "%\\?" res)
+          (setq res (replace-regexp-in-string "%\\?" (lambda (_) title) res t t))
+        (unless (string-empty-p title)
+          (setq res (concat res " " title)))))
+    ;; 3. Expand %<FORMAT> timestamps
+    (while (string-match "%<\\([^>]+\\)>" res)
+      (let ((fmt (match-string 1 res)))
+        (setq res (replace-match (format-time-string fmt) t t res))))
+    ;; 4. Expand standard timestamp macros
+    (setq res (replace-regexp-in-string "%T" (lambda (_) (format-time-string "<%Y-%m-%d %a %H:%M>")) res t t))
+    (setq res (replace-regexp-in-string "%t" (lambda (_) (format-time-string "<%Y-%m-%d %a>")) res t t))
+    (setq res (replace-regexp-in-string "%U" (lambda (_) (format-time-string "[%Y-%m-%d %a %H:%M]")) res t t))
+    (setq res (replace-regexp-in-string "%u" (lambda (_) (format-time-string "[%Y-%m-%d %a]")) res t t))
+    ;; 5. Expand link placeholders
+    (let ((link (if (bound-and-true-p org-stored-links)
+                    (let ((latest (car org-stored-links)))
+                      (if (cadr latest)
+                          (format "[[%s][%s]]" (car latest) (cadr latest))
+                        (format "[[%s]]" (car latest))))
+                  "")))
+      (setq res (replace-regexp-in-string "%(orgx-capture--get-link)" (lambda (_) link) res t t))
+      (setq res (replace-regexp-in-string "%(orgx-capture--prompt-link)" (lambda (_) link) res t t))
+      (setq res (replace-regexp-in-string "%a" (lambda (_) link) res t t)))
+    ;; 6. Expand clipboard / region / kill-ring placeholders
+    (setq res (replace-regexp-in-string "%i" "" res t t))
+    (setq res (replace-regexp-in-string "%x" "" res t t))
+    (setq res (replace-regexp-in-string "%c" (lambda (_) (or (and (fboundp 'current-kill) (ignore-errors (current-kill 0 t))) "")) res t t))
+    ;; 7. Clean up
+    (string-trim-right res)))
+
 (defun orgx-capture-shell--format-entry (text template)
-  "Format capture TEXT according to TEMPLATE (\\='task, \\='note, \\='journal, \\='plain)."
+  "Format capture TEXT according to TEMPLATE (symbol or key string)."
   (let ((trimmed (string-trim text)))
     (if (string-match-p orgx-capture-shell--heading-line-regexp trimmed)
         trimmed
-      (pcase template
-        ('task
-         (format "* TODO %s" trimmed))
-        ('journal
-         (let* ((parts (split-string trimmed "\n"))
-                (title (car parts))
-                (body (cdr parts)))
-           (concat (format "* %s <%s>" title
-                           (format-time-string "%Y-%m-%d %H:%M"))
-                   (if body (concat "\n" (string-join body "\n")) ""))))
-        (_
-         (format "* %s" trimmed))))))
+      (if-let* ((entry (orgx-capture-shell--find-template template)))
+          (let ((template-body (nth 4 entry)))
+            (cond
+             ((stringp template-body)
+              (orgx-capture-shell--interpolate-template template-body trimmed))
+             ((functionp template-body)
+              (funcall template-body))
+             (t
+              (format "* %s" trimmed))))
+        (pcase template
+          ('task
+           (format "* TODO %s" trimmed))
+          ('journal
+           (let* ((parts (split-string trimmed "\n"))
+                  (title (car parts))
+                  (body (cdr parts)))
+             (concat (format "* %s <%s>" title
+                             (format-time-string "%Y-%m-%d %H:%M"))
+                     (if body (concat "\n" (string-join body "\n")) ""))))
+          (_
+           (format "* %s" trimmed)))))))
 
 (defun orgx-capture-shell--relevel (text level)
   "Shift the headings in TEXT so the shallowest one is at LEVEL."
@@ -329,20 +449,25 @@ the `org-capture-templates' entry of the same kind is used, preferring one
 whose target is FILE; absent one, the builtin default for TEMPLATE."
   (if (not (eq orgx-capture-shell-prepend 'follow))
       orgx-capture-shell-prepend
-    (let* ((kind (alist-get template orgx-capture-shell--template-kinds))
-           (candidates
-            (and kind (boundp 'org-capture-templates)
-                 (seq-filter (lambda (tpl)
-                               (and (consp tpl) (>= (length tpl) 5)
-                                    (stringp (nth 1 tpl))
-                                    (string-prefix-p kind (nth 1 tpl))))
-                             org-capture-templates)))
-           (tpl (or (seq-find (lambda (c) (orgx-capture-shell--template-file-p c file))
-                              candidates)
-                    (car candidates))))
-      (if tpl
-          (and (plist-get (nthcdr 5 tpl) :prepend) t)
-        (alist-get template orgx-capture-shell--builtin-prepend t)))))
+    (if-let* ((exact (orgx-capture-shell--find-template template)))
+        (let ((plist (nthcdr 5 exact)))
+          (if (plist-member plist :prepend)
+              (and (plist-get plist :prepend) t)
+            t))
+      (let* ((kind (alist-get template orgx-capture-shell--template-kinds))
+             (candidates
+              (and kind (boundp 'org-capture-templates)
+                   (seq-filter (lambda (tpl)
+                                 (and (consp tpl) (>= (length tpl) 5)
+                                      (stringp (nth 1 tpl))
+                                      (string-prefix-p kind (nth 1 tpl))))
+                               org-capture-templates)))
+             (tpl (or (seq-find (lambda (c) (orgx-capture-shell--template-file-p c file))
+                                candidates)
+                      (car candidates))))
+        (if tpl
+            (and (plist-get (nthcdr 5 tpl) :prepend) t)
+          (alist-get template orgx-capture-shell--builtin-prepend t))))))
 
 (defun orgx-capture-shell--insertion-point (parent level end &optional prepend)
   "Return where a new child of the section at LEVEL belongs.
@@ -553,10 +678,42 @@ Values come from the shell buffer when it exists, else from target resolution."
       (funcall read-defaults))))
 
 (defun orgx-capture-shell--read-template (default)
-  "Prompt for a template, offering DEFAULT (a symbol)."
-  (intern (completing-read "Template: "
-                           (mapcar #'symbol-name orgx-capture-shell-templates)
-                           nil t nil nil (symbol-name default))))
+  "Prompt for a template, offering DEFAULT (a symbol or string)."
+  (let* ((available (orgx-capture-shell--available-templates))
+         (default-str (cond
+                       ((symbolp default) (symbol-name default))
+                       ((stringp default) default)
+                       (t "task")))
+         (choice-table (make-hash-table :test #'equal))
+         (candidates nil)
+         (group-table (make-hash-table :test #'equal)))
+    (dolist (item available)
+      (let ((label (nth 0 item))
+            (val (nth 1 item))
+            (ann (nth 2 item))
+            (grp (nth 3 item)))
+        (setf (map-elt choice-table label) val)
+        (let ((raw (if (symbolp val) (symbol-name val) val)))
+          (unless (map-elt choice-table raw)
+            (setf (map-elt choice-table raw) val)))
+        (push (cons label ann) candidates)
+        (setf (map-elt group-table label) grp)))
+    (setq candidates (nreverse candidates))
+    (let ((chosen
+           (if (fboundp 'annotated-completing-read)
+               (annotated-completing-read
+                candidates
+                :prompt "Template: "
+                :require-match nil
+                :default default-str
+                :group-name (lambda (cand) (map-elt group-table cand "")))
+             (completing-read (format "Template (default %s): " default-str)
+                              candidates
+                              nil nil nil nil default-str))))
+      (or (map-elt choice-table chosen)
+          (map-elt choice-table (string-trim chosen))
+          (intern-soft chosen)
+          chosen))))
 
 (defun orgx-capture-shell--read-file (default)
   "Prompt for a target file, offering DEFAULT."
@@ -780,7 +937,9 @@ STATUS is `ready', `success', or `error'; it defaults to `ready'."
                          (if (and headline (not (string-empty-p headline)))
                              (format " : %s" headline)
                            "")
-                         orgx-capture-shell-current-template)))
+                         (if (symbolp orgx-capture-shell-current-template)
+                             (symbol-name orgx-capture-shell-current-template)
+                           orgx-capture-shell-current-template))))
     (propertize prompt
                 'read-only t
                 'front-sticky '(read-only)
@@ -827,16 +986,16 @@ STATUS is `ready', `success', or `error'; it defaults to `ready'."
        (let ((trimmed (string-trim args)))
          (if (string-empty-p trimmed)
              (format "Current template: %s" orgx-capture-shell-current-template)
-           (let ((sym (intern (downcase trimmed))))
-             (if (memq sym orgx-capture-shell-templates)
-                 (progn
-                   (setq orgx-capture-shell-current-template sym)
-                   (format "Template switched to: %s" sym))
-               (when orgx-capture-shell--status
-                 (setq orgx-capture-shell--status 'error))
-               (format "Unknown template: %s (choose %s)"
-                       trimmed
-                       (mapconcat #'symbol-name orgx-capture-shell-templates ", ")))))))
+           (condition-case nil
+               (progn
+                 (orgx-capture-shell-set-template trimmed)
+                 (format "Template switched to: %s" orgx-capture-shell-current-template))
+             (user-error
+              (when orgx-capture-shell--status
+                (setq orgx-capture-shell--status 'error))
+              (format "Unknown template: %s (choose %s)"
+                      trimmed
+                      (string-join (orgx-capture-shell--template-keys) ", ")))))))
       ("form"
        (orgx-capture-shell--run-form args))
       ("denote"
@@ -975,7 +1134,7 @@ Completes command names, `/template' names, and `/target' files and headlines."
         (list start (point) orgx-capture-shell-commands :exclusive 'no))
        ((string-match "\\`/\\(?:template\\|tpl\\)[ \t]+\\(\\S-*\\)\\'" line)
         (list (+ start (match-beginning 1)) (point)
-              (mapcar #'symbol-name orgx-capture-shell-templates)
+              (orgx-capture-shell--template-keys)
               :exclusive 'no))
        ((string-match "\\`/\\(?:target\\|t\\)[ \t]+\\(.*\\)\\'" line)
         (let* ((arg (match-string 1 line))
@@ -1329,19 +1488,49 @@ window.  If it is hidden or not active, display it in the bottom popup window."
                ""))))
 
 (defun orgx-capture-shell-set-template (template)
-  "Set the active capture TEMPLATE."
+  "Set the active capture TEMPLATE (symbol or key string).
+When TEMPLATE specifies a target file in `org-capture-templates' and
+`orgx-capture-shell-sync-target-on-template' is non-nil, update
+`orgx-capture-shell-current-file' and `orgx-capture-shell-current-headline'."
   (interactive
-   (list (intern (annotated-completing-read
-                  (seq-map (lambda (template) (cons (symbol-name template) nil))
-                           orgx-capture-shell-templates)
-                  :prompt "Template: " :require-match t))))
-  (unless (memq template orgx-capture-shell-templates)
-    (user-error "Invalid template: %s (choose %s)"
-                template
-                (mapconcat #'symbol-name orgx-capture-shell-templates ", ")))
-  (setq orgx-capture-shell-current-template template)
-  (orgx-capture-shell--rename-buffer)
-  (message "Template set to %s" template))
+   (list (orgx-capture-shell--read-template orgx-capture-shell-current-template)))
+  (let* ((str (if (symbolp template) (symbol-name template) (string-trim template)))
+         (sym (intern-soft str))
+         (canonical (cond
+                     ((memq sym orgx-capture-shell-templates) sym)
+                     ((orgx-capture-shell--find-template str) str)
+                     ((orgx-capture-shell--find-template sym) (symbol-name sym))
+                     (t (user-error "Invalid template: %s (choose from %s)"
+                                    template
+                                    (string-join (orgx-capture-shell--template-keys) ", "))))))
+    (setq orgx-capture-shell-current-template canonical)
+    (when-let* ((_ orgx-capture-shell-sync-target-on-template)
+                (entry (orgx-capture-shell--find-template canonical))
+                (target (nth 3 entry)))
+      (when (consp target)
+        (let* ((type (car target))
+               (raw-file (cadr target))
+               (file (and (stringp raw-file)
+                          (expand-file-name raw-file (or (bound-and-true-p org-directory)
+                                                         default-directory))))
+               (headline (pcase type
+                           ('file+headline (nth 2 target))
+                           ('file+olp (string-join (nthcdr 2 target)
+                                                  orgx-capture-shell-headline-separator))
+                           ('file+olp+datetree (nth 2 target))
+                           (_ nil))))
+          (when file
+            (orgx-capture-shell--set-target file headline t)))))
+    (orgx-capture-shell--rename-buffer)
+    (message "Template set to %s%s"
+             canonical
+             (if orgx-capture-shell-current-file
+                 (format " [target: %s%s]"
+                         (file-name-nondirectory orgx-capture-shell-current-file)
+                         (if orgx-capture-shell-current-headline
+                             (format ":%s" orgx-capture-shell-current-headline)
+                           ""))
+               ""))))
 
 (defun orgx-capture-shell-set-denote-target ()
   "Prompt for a denote note and set it as capture target."
@@ -1369,6 +1558,16 @@ window.  If it is hidden or not active, display it in the bottom popup window."
   (when orgx-capture-shell-current-file
     (find-file orgx-capture-shell-current-file)))
 
+;;;###autoload
+(defun orgx-capture-shell-execute-command ()
+  "Run `execute-extended-command' filtered to `orgx-capture-shell' commands."
+  (interactive)
+  (let ((read-extended-command-predicate
+         (lambda (sym _)
+           (string-prefix-p "orgx-capture-shell" (symbol-name sym)))))
+    (with-suppressed-warnings ((interactive-only execute-extended-command))
+      (execute-extended-command nil))))
+
 ;;;###autoload (autoload 'orgx-capture-shell-transient "orgx-capture-shell" nil t)
 (transient-define-prefix orgx-capture-shell-transient ()
   "Transient menu for orgx capture shell operations."
@@ -1379,7 +1578,8 @@ window.  If it is hidden or not active, display it in the bottom popup window."
     ("F" "Capture Form" orgx-capture-shell-form)
     ("u" "Undo Last Capture" orgx-capture-shell-undo-command)
     ("r" "Restart Helper" orgx-capture-shell-restart)
-    ("o" "Visit Current Target" orgx-capture-shell-visit-target-command)]
+    ("o" "Visit Current Target" orgx-capture-shell-visit-target-command)
+    ("x" "Execute Shell Command" orgx-capture-shell-execute-command)]
    ["Switch Modality"
     ("f" "Set Target File" orgx-capture-shell-set-target-file)
     ("m" "Set Template" orgx-capture-shell-set-template)
