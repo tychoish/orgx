@@ -138,12 +138,14 @@ insert an inactive date-time stamp `[YYYY-MM-DD Day HH:MM]'."
     (nreverse alist)))
 
 (defun orgx--toc-bind-priorities (fn &rest args)
-  "Around advice for `toc-org-insert-toc': collect buffer priorities."
+  "Around advice for `toc-org-insert-toc': collect buffer priorities.
+FN is the advised function, called with ARGS."
   (let ((orgx--toc-priorities (orgx--toc-collect-priorities)))
     (apply fn args)))
 
 (defun orgx--toc-hrefify-priority (fn str &optional hash)
-  "Around advice for `toc-org-hrefify-gh': prepend heading priority."
+  "Around advice for `toc-org-hrefify-gh': prepend heading priority.
+FN is the advised function, called with STR and HASH."
   (if-let* ((cell (assoc str orgx--toc-priorities)))
       (progn
         (setq orgx--toc-priorities (delq cell orgx--toc-priorities))
@@ -197,7 +199,7 @@ Updates `orgx-local-notes-directory' and the associated Org paths."
 
 ;;;###autoload
 (defun orgx-add-notes-to-agenda ()
-  "Add configured Org directories to `org-agenda-files'."
+  "Add configured Org directories to variable `org-agenda-files'."
   (if (stringp org-agenda-files)
       (display-warning 'orgx "Cannot add directories: org-agenda-files names a file" :warning)
     (seq-do (lambda (directory)
@@ -217,7 +219,7 @@ Updates `orgx-local-notes-directory' and the associated Org paths."
 
 ;;;###autoload
 (defun orgx-agenda-files-open ()
-  "Open all files listed in `org-agenda-files'."
+  "Open all files listed in variable `org-agenda-files'."
   (interactive)
   (when (boundp 'org-agenda-files)
     (seq-do (lambda (f)
@@ -230,7 +232,7 @@ Updates `orgx-local-notes-directory' and the associated Org paths."
 
 ;;;###autoload
 (defun orgx-agenda-files-reload ()
-  "Revert all buffers visiting `org-agenda-files' to match disk."
+  "Revert all buffers visiting variable `org-agenda-files' to match disk."
   (interactive)
   (when (boundp 'org-agenda-files)
     (seq-do (lambda (f)
@@ -258,7 +260,8 @@ Updates `orgx-local-notes-directory' and the associated Org paths."
   buf)
 
 (defun orgx--ad-org-agenda-redo (orig-fun &rest args)
-  "Advice to background-revert buffers before re-running agenda view."
+  "Advice to background-revert buffers before re-running agenda view.
+ORIG-FUN is the advised function, called with ARGS."
   (orgx-refresh-todo-faces)
   (orgx--background-revbufs)
   (apply orig-fun args))
@@ -452,7 +455,8 @@ processed; descendants move with their parent."
 ;;;###autoload
 (defun orgx-agenda-untagged-in-file (file &optional tag todo-only inherited)
   "Show untagged tasks in FILE.
-When optional TAG is supplied, search for that tag instead."
+When optional TAG is supplied, search for that tag instead.
+TODO-ONLY and INHERITED are passed to the agenda matcher."
   (interactive "fFile: ")
   (let ((org-agenda-files (list file)))
     (if tag
@@ -543,7 +547,7 @@ When optional TAG is supplied, search for that tag instead."
 
 ;;;###autoload
 (defun orgx-agenda-view ()
-  "Select an org-agenda view via annotated completing read.
+  "Select an `org-agenda' view via annotated completing read.
 Includes both the standard built-in views and any entries in
 `org-agenda-custom-commands'.  Each candidate is labeled with its
 dispatch key (e.g. \"da: Denote Agenda ALL\") and annotated with its
@@ -618,7 +622,8 @@ buffer position."
 ;;; Link handling
 
 (defun orgx-link-github-line-support (orig-fn path in-emacs)
-  "Support GitHub-style line fragments (#L123 or #L123-L145) in file links."
+  "Support GitHub-style line fragments (#L123 or #L123-L145) in file links.
+ORIG-FN is the advised function, called with PATH and IN-EMACS."
   (if (string-match "\\`\\(.*?\\)#L\\([0-9]+\\)\\(?:-L[0-9]+\\)?\\(?:\\(::.*\\)\\)?\\'" path)
       (let* ((real-path (match-string 1 path))
              (line (string-to-number (match-string 2 path)))
@@ -629,7 +634,7 @@ buffer position."
     (funcall orig-fn path in-emacs)))
 
 (defun orgx-open-custom-id-slug-fallback (path)
-  "Open custom ID link fallback."
+  "Open custom ID link fallback for PATH."
   (when (string-prefix-p "#" path)
     (let ((custom-id (substring path 1)))
       (org-link-search (concat "#" custom-id))
@@ -857,8 +862,8 @@ Only the display changes.  Widths are `orgx-table-shrink-width'."
   :group 'orgx)
 
 (define-minor-mode orgx-mode
-  "Personal org-mode keybindings and buffer setup.
-Activates `orgx-command-map' under C-c o."
+  "Personal `org-mode' keybindings and buffer setup.
+Activates `orgx-command-map' under \\`C-c o'."
   :lighter " ox"
   :keymap orgx-mode-map
   (if orgx-mode
@@ -890,7 +895,7 @@ Activates `orgx-command-map' under C-c o."
 
 ;;;###autoload
 (define-minor-mode orgx-agenda-minor-mode
-  "Personal org-agenda keybindings and setup."
+  "Personal `org-agenda' keybindings and setup."
   :lighter " oxa"
   :keymap orgx-agenda-minor-mode-map
   (when orgx-agenda-minor-mode
@@ -1346,6 +1351,7 @@ The plist contains:
 
 (defun orgx-entry-read-in-file (file match-property match-value)
   "Visit FILE and return `orgx-entry-get' for the heading matching MATCH-PROPERTY.
+MATCH-VALUE is the property value to match.
 Signal an error if no heading matches.  Prompts are suppressed."
   (let* ((file (expand-file-name file))
          (buf (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) t))

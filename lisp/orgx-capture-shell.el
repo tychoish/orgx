@@ -79,7 +79,7 @@ that file and headline are used as the default target."
   :group 'orgx-capture-shell)
 
 (defcustom orgx-capture-shell-window-rule t
-  "When non-nil, automatically register display-buffer rule for bottom popup."
+  "When non-nil, automatically register `display-buffer' rule for bottom popup."
   :type 'boolean
   :group 'orgx-capture-shell)
 
@@ -114,7 +114,8 @@ never lands after a trailing child tagged with `org-archive-tag'."
   :group 'orgx-capture-shell)
 
 (defcustom orgx-capture-shell-sync-target-on-template t
-  "When non-nil, activating a capture template with a concrete target file
+  "Non-nil means track the target file of the activated capture template.
+When non-nil, activating a template with a concrete target file
 automatically updates `orgx-capture-shell-current-file' and
 `orgx-capture-shell-current-headline'."
   :type 'boolean
@@ -1062,7 +1063,7 @@ A doubled trigger is an escape: it captures INPUT with one trigger removed."
 (defun orgx-capture-shell-input-sender (proc input)
   "Send and process INPUT from the comint prompt via PROC.
 A semicolon followed by body text separates the title from the body.
-Use C-j to insert a literal newline before submitting with RET."
+Use \\`C-j' to insert a literal newline before submitting with RET."
   (let* ((trimmed (string-trim input))
          (force orgx-capture-shell--force-form)
          (orgx-capture-shell--status 'ready)
@@ -1113,7 +1114,7 @@ Use C-j to insert a literal newline before submitting with RET."
 
 (defconst orgx-capture-shell-commands
   '("/target" "/template" "/form" "/denote" "/undo" "/recent" "/list" "/clear" "/help")
-  "List of recognized slash commands in orgx-capture-shell.")
+  "List of recognized slash commands in `orgx-capture-shell'.")
 
 (defun orgx-capture-shell--input-start ()
   "Return the buffer position where user input begins on the current line."
@@ -1124,7 +1125,7 @@ Use C-j to insert a literal newline before submitting with RET."
       (point))))
 
 (defun orgx-capture-shell-completion-at-point ()
-  "Completion at point function for orgx-capture-shell slash commands.
+  "Completion at point function for `orgx-capture-shell' slash commands.
 Completes command names, `/template' names, and `/target' files and headlines."
   (unless orgx-capture-shell-hide-slash-commands
     (let* ((start (orgx-capture-shell--input-start))

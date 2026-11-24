@@ -88,7 +88,7 @@ When nil or empty, captures target the file directly without a parent headline."
 (defun orgx-capture--select-template ()
   "Interactively select an `org-capture-templates' key.
 Uses `annotated-completing-read', grouping candidates primarily by
-target file. Templates with no file target (e.g. function-based
+target file.  Templates with no file target (e.g. function-based
 integration targets) fall back to their key-prefix's root description
 when even that is unknown."
   (let* ((key-table (make-hash-table :test #'equal))
@@ -154,8 +154,9 @@ plain `org-capture'."
 
 (defun orgx-capture--prompt-link ()
   "Interactively select or create an Org link.
-If `org-stored-links' is non-nil, offers candidates via ACR/completing-read.
-Otherwise prompts for a link target and optional description."
+If `org-stored-links' is non-nil, offers candidates via ACR or
+`completing-read'.  Otherwise prompts for a link target and optional
+description."
   (let* ((candidates (seq-map (lambda (item)
                                 (let ((link (car item))
                                       (desc (cadr item)))
@@ -216,7 +217,7 @@ CHAR is the single-letter kind prefix (\"t\", \"j\", \"n\").  KEY is
 the project prefix; an empty string disables the hierarchical
 \"<key><suffix>\" and shortcut \"<char><key>\" entries.
 
-TARGET is the org-capture target form.  BODY-FN is called with
+TARGET is the `org-capture' target form.  BODY-FN is called with
 two arguments: the per-template body anchor string and a boolean flag
 indicating whether the link is placed directly on the heading line.
 It returns the template body string.
@@ -272,7 +273,8 @@ ends with TIME-PROMPT-SUFFIX, the template is marked :time-prompt t."
 
 ;;;###autoload
 (cl-defun orgx-capture-add-journal-templates (&key name path (key ""))
-  "Register a full set of journal capture templates for NAME at PATH."
+  "Register a full set of journal capture templates for NAME at PATH.
+KEY is the project key prefix."
   (orgx-capture--add-flat-templates
    :kind "journal" :char "j" :name name :path path :key key
    :target (if (string-equal "" key)
@@ -328,7 +330,8 @@ Otherwise, templates target the headline named HEADLINE in PATH."
 
 ;;;###autoload
 (cl-defun orgx-capture-add-note-templates (&key name path (key ""))
-  "Register a full set of note capture templates for NAME at PATH."
+  "Register a full set of note capture templates for NAME at PATH.
+KEY is the project key prefix."
   (orgx-capture--add-flat-templates
    :kind "notes" :char "n" :name name :path path :key key
    :target (list 'file+headline path "Inbox")
@@ -353,6 +356,7 @@ Otherwise, templates target the headline named HEADLINE in PATH."
 ;;;###autoload
 (defmacro orgx-capture-add-project-file-templates (&rest args)
   "Register project file capture templates for PATH.
+ARGS are passed to `orgx-capture--add-project-file-templates'.
 If `org' is loaded, configures templates immediately; otherwise hooks
 into `org-load-hook'."
   `(if (featurep 'org)
@@ -361,7 +365,9 @@ into `org-load-hook'."
                (lambda () (orgx-capture--add-project-file-templates ,@args)))))
 
 (cl-defun orgx-capture--add-project-file-templates (&key name (path nil) (key "") (agenda nil))
-  "Define a set of capture templates for adding notes and tasks to PATH."
+  "Define a set of capture templates for adding notes and tasks to PATH.
+NAME is the project name, KEY the key prefix, and AGENDA, when non-nil,
+adds PATH to variable `org-agenda-files'."
   (unless (and (boundp 'org-capture-templates) org-capture-templates)
     (orgx-capture-reset-templates))
 

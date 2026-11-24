@@ -68,7 +68,7 @@
 (defcustom orgx-bulk-directory (locate-user-emacs-file "orgx-bulk")
   "Directory where saved `org-agenda' plan files (`.eld') are stored.
 Plans carry this directory, so `hitl-plan' persists them here rather than
-in `hitl-plan-directory'."
+in variable `hitl-plan-directory'."
   :type 'directory
   :group 'orgx-bulk)
 
@@ -115,7 +115,7 @@ step list holds the steps completed by that execution."
 (defcustom orgx-bulk-mcp-allowed-files nil
   "Extra files and directories plans made over MCP may touch.
 Plans an agent creates over MCP (origin `mcp', see `hitl-plan-origin-mcp-p')
-may only read or modify local Org files that are in `org-agenda-files',
+may only read or modify local Org files that are in variable `org-agenda-files',
 under `denote-directory', or listed here (a directory allows every Org file
 beneath it).  This governs scope files, target files, refile destinations
 and archive destinations.  Plans you make yourself are not restricted."
@@ -174,8 +174,8 @@ TRAMP-like names, empty names and names with control characters fail."
 (defun orgx-bulk-file-allowed-p (file)
   "Return non-nil if an MCP-origin plan may use FILE.
 FILE must be a local, existing, regular Org file (`.org' or `.org_archive')
-that is one of `org-agenda-files', is under `denote-directory', or is in
-\(or under a directory in) `orgx-bulk-mcp-allowed-files'.  Symbolic links are
+that is one of variable `org-agenda-files', is under `denote-directory', or is
+in \(or under a directory in) `orgx-bulk-mcp-allowed-files'.  Symbolic links are
 resolved first, so a link cannot smuggle in another file."
   (and (orgx-bulk--local-name-p file)
        (let ((truename (ignore-errors (file-truename (expand-file-name file)))))

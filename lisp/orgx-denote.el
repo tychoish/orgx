@@ -207,6 +207,7 @@ excludes completed notes."
 
 (defun orgx-denote-agenda-settings (header &optional files-form)
   "Return shared `org-agenda-custom-commands' settings for a denote view.
+HEADER is the overriding agenda header.
 Scopes to FILES-FORM (defaults to `(orgx-denote-files)'), sorts by denote
 signature, and formats the sequence category."
   `((org-agenda-files ,(or files-form '(orgx-denote-files)))
@@ -264,6 +265,9 @@ signature, and formats the sequence category."
                                                   (chunk-size orgx-denote-agenda-warm-chunk-size)
                                                   (delay orgx-denote-agenda-warm-delay))
   "Warm unvisited FILES in yielding batches, then call ON-DONE.
+LABEL names the batch job.
+CHUNK-SIZE is the number of files per batch and DELAY the pause
+between batches.
 Batches run through `gen-mapc-async'.  If all FILES are already open in
 buffers in `org-mode' (or in noninteractive batch mode), calls ON-DONE
 immediately."
@@ -696,7 +700,7 @@ Sets the DENOTE_ID property for idempotency."
 (defun orgx-denote-capture-open-items (&optional files)
   "Capture one linked heading per denote note that has open TODO items.
 FILES defaults to every active note, filtered by tags prompted for.
-When FILES is given, as from a denote-dash view, it is used as is.
+When FILES is given, as from a `denote-dash' view, it is used as is.
 Prompts for which TODO keywords count as open, then for a target
 heading via `org-refile'.  Notes already linked from a child of the
 target are handled per `orgx-denote-capture-dedupe'.  The headings land

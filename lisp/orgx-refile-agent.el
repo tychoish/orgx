@@ -30,12 +30,12 @@
 (declare-function agent-shell-queue--open-capture "agent-shell-queue-ui")
 
 (defgroup orgx-refile-agent nil
-  "Refile Org subtrees to agent-shell sessions."
+  "Refile Org subtrees to `agent-shell' sessions."
   :group 'orgx
   :prefix "orgx-refile-agent-")
 
 (defcustom orgx-refile-agent-prefix "agent-shell:"
-  "Prefix of the agent-shell entries in the refile target list."
+  "Prefix of the `agent-shell' entries in the refile target list."
   :type 'string
   :group 'orgx-refile-agent)
 
@@ -52,7 +52,7 @@ stays in the kill ring); `mark' sets it to `orgx-refile-agent-mark-state'."
   :group 'orgx-refile-agent)
 
 (defconst orgx-refile-agent--file "agent-shell"
-  "Pseudo file name carried by agent-shell refile targets.")
+  "Pseudo file name carried by `agent-shell' refile targets.")
 
 (defvar orgx-refile-agent--active nil
   "Non-nil while `org-refile' is running and agent targets should be offered.")
@@ -65,7 +65,7 @@ stays in the kill ring); `mark' sets it to `orgx-refile-agent-mark-state'."
 BUFFER is nil for the unassigned queue.")
 
 (defun orgx-refile-agent--entry-alist ()
-  "Return an alist (NAME . BUFFER) of agent-shell refile targets."
+  "Return an alist (NAME . BUFFER) of `agent-shell' refile targets."
   (cons (cons (format "%s (unassigned queue)" orgx-refile-agent-prefix) nil)
         (when (fboundp 'agent-shell-buffers)
           (mapcar (lambda (buf)
@@ -102,10 +102,10 @@ Always `keep' when refiling as a copy (`org-refile-keep')."
 
 (defun orgx-refile-agent-send (buffer)
   "Open a queue capture buffer for BUFFER seeded with the subtree at point.
-BUFFER is an agent-shell buffer, or nil for the unassigned queue.  Then
+BUFFER is an `agent-shell' buffer, or nil for the unassigned queue.  Then
 apply `orgx-refile-agent-original-action' to the original heading."
   (unless (fboundp 'agent-shell-queue--open-capture)
-    (user-error "agent-shell-queue is not available"))
+    (user-error "Agent-shell-queue is not available"))
   (org-back-to-heading t)
   (let* ((origin (current-buffer))
          (text (buffer-substring-no-properties
@@ -172,7 +172,7 @@ location itself, so the heading is found through its marker."
 
 ;;;###autoload
 (defun orgx-refile-agent-enable ()
-  "Offer agent-shell targets in `org-refile'."
+  "Offer `agent-shell' targets in `org-refile'."
   (advice-add 'org-refile :around #'orgx-refile-agent--ad-refile)
   (advice-add 'org-agenda-refile :around #'orgx-refile-agent--ad-agenda-refile)
   (advice-add 'org-refile-get-targets :filter-return #'orgx-refile-agent--ad-get-targets)
@@ -180,7 +180,7 @@ location itself, so the heading is found through its marker."
 
 ;;;###autoload
 (defun orgx-refile-agent-disable ()
-  "Stop offering agent-shell targets in `org-refile'."
+  "Stop offering `agent-shell' targets in `org-refile'."
   (advice-remove 'org-refile #'orgx-refile-agent--ad-refile)
   (advice-remove 'org-agenda-refile #'orgx-refile-agent--ad-agenda-refile)
   (advice-remove 'org-refile-get-targets #'orgx-refile-agent--ad-get-targets)

@@ -305,6 +305,7 @@ Returns `(AGENDA-BUFFER . TARGETS)' and sets buffer-local
 ;;;###autoload
 (cl-defun orgx-bulk-agenda-prepare-scope-async (scope on-done &key (chunk-size 5))
   "Warm cold files in SCOPE in yielding batches, then call ON-DONE with SCOPE.
+CHUNK-SIZE is the number of files warmed per batch.
 When SCOPE has no cold files, calls ON-DONE immediately."
   (let* ((files (orgx-bulk-agenda--scope-files scope))
          (cold (and (consp files)
