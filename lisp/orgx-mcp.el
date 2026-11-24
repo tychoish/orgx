@@ -464,16 +464,22 @@ KEYS are the required string arguments.  FILE must be allowed (see
                                :column (:type "integer" :description "Fill column, defaults to 72")
                                :dry_run (:type "boolean" :description "Report whether the file would change without writing"))
                   :required ["file"])
-  (let ((path (expand-file-name (plist-get args :file))))
+  (let* ((path (expand-file-name (plist-get args :file)))
+         (visiting (find-buffer-visiting path)))
     (unless (file-exists-p path)
       (user-error "File not found: %s" path))
+    (when (and visiting (buffer-modified-p visiting))
+      (user-error "Buffer visiting %s has unsaved changes" path))
     (with-temp-buffer
       (insert-file-contents path)
       (let ((buffer-file-name path))
         (set-auto-mode))
       (let ((changed (orgx-fill-buffer (plist-get args :column))))
         (when (and changed (not (eq (plist-get args :dry_run) t)))
-          (write-region (point-min) (point-max) path))
+          (write-region (point-min) (point-max) path)
+          (when visiting
+            (with-current-buffer visiting
+              (revert-buffer t t t))))
         (list :file path :changed (if changed t :false))))))
 
 (provide 'orgx-mcp)

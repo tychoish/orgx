@@ -119,7 +119,8 @@ Signal an error carrying the handler's error message on failure."
                          "bulk_ops" "bulk_plan_create" "bulk_plan_list"
                          "bulk_plan_status" "bulk_plan_discard" "bulk_plan_execute"
                          "org_heading_get" "org_heading_set_property"
-                         "org_heading_set_todo" "org_heading_append_note"))))
+                         "org_heading_set_todo" "org_heading_append_note"
+                         "org_fill_file"))))
 
 (ert-deftest orgx-mcp-capture-tools-test ()
   (let ((calls nil))
@@ -590,5 +591,100 @@ Signal an error carrying the handler's error message on failure."
       (with-temp-buffer
         (insert text) (org-mode)
         (should (= 2 (length (org-map-entries #'point "LEVEL=1"))))))))
+
+;;; org_fill_file
+
+(defconst orgx-mcp-test--long
+  "foo bar baz qux quux corge grault garply waldo fred plugh xyzzy thud foo bar baz qux quux corge grault garply"
+  "A paragraph longer than the default 72 column fill width.")
+
+(defun orgx-mcp-test--read (file)
+  "Return the contents of FILE as a string."
+  (with-temp-buffer
+    (insert-file-contents file)
+    (buffer-string)))
+
+(defmacro orgx-mcp-test--with-fill-file (var content &rest body)
+  "Bind VAR to a temp org file holding CONTENT and run BODY, then clean up."
+  (declare (indent 2))
+  `(let ((,var (make-temp-file "orgx-fill-" nil ".org" ,content)))
+     (unwind-protect
+         (progn ,@body)
+       (when-let* ((buf (find-buffer-visiting ,var)))
+         (with-current-buffer buf (set-buffer-modified-p nil))
+         (kill-buffer buf))
+       (delete-file ,var))))
+
+(ert-deftest orgx-mcp-fill-file-fills-and-saves-test ()
+  (orgx-mcp-test--with-fill-file f (concat "* Heading " orgx-mcp-test--long "\n"
+                                           orgx-mcp-test--long "\n"
+                                           "#+begin_src sh\n" orgx-mcp-test--long "\n#+end_src\n")
+    (let ((res (orgx-mcp-test--call "org_fill_file" (list :file f))))
+      (should (equal (plist-get res :file) f))
+      (should (eq (plist-get res :changed) t)))
+    (let ((out (orgx-mcp-test--read f)))
+      (should (string-prefix-p (concat "* Heading " orgx-mcp-test--long "\n") out))
+      (should (string-match-p (concat "^" orgx-mcp-test--long "\n#\\+end_src") out))
+      (should (<= (length (nth 1 (split-string out "\n"))) 72)))))
+
+(ert-deftest orgx-mcp-fill-file-column-test ()
+  (orgx-mcp-test--with-fill-file f (concat orgx-mcp-test--long "\n")
+    (orgx-mcp-test--call "org_fill_file" (list :file f :column 30))
+    (should (seq-every-p (lambda (l) (<= (length l) 30))
+                         (split-string (orgx-mcp-test--read f) "\n")))))
+
+(ert-deftest orgx-mcp-fill-file-default-column-test ()
+  (orgx-mcp-test--with-fill-file f (concat orgx-mcp-test--long "\n")
+    (orgx-mcp-test--call "org_fill_file" (list :file f))
+    (should (seq-every-p (lambda (l) (<= (length l) 72))
+                         (split-string (orgx-mcp-test--read f) "\n")))))
+
+(ert-deftest orgx-mcp-fill-file-dry-run-test ()
+  (orgx-mcp-test--with-fill-file f (concat orgx-mcp-test--long "\n")
+    (let ((res (orgx-mcp-test--call "org_fill_file" (list :file f :dry_run t))))
+      (should (eq (plist-get res :changed) t)))
+    (should (equal (orgx-mcp-test--read f) (concat orgx-mcp-test--long "\n")))))
+
+(ert-deftest orgx-mcp-fill-file-unchanged-test ()
+  (orgx-mcp-test--with-fill-file f "* Heading\nshort text\n"
+    (let ((res (orgx-mcp-test--call "org_fill_file" (list :file f))))
+      (should (eq (plist-get res :changed) :false)))
+    (should (equal (orgx-mcp-test--read f) "* Heading\nshort text\n"))))
+
+(ert-deftest orgx-mcp-fill-file-idempotent-test ()
+  (orgx-mcp-test--with-fill-file f (concat orgx-mcp-test--long "\n")
+    (orgx-mcp-test--call "org_fill_file" (list :file f))
+    (let ((res (orgx-mcp-test--call "org_fill_file" (list :file f))))
+      (should (eq (plist-get res :changed) :false)))))
+
+(ert-deftest orgx-mcp-fill-file-missing-file-test ()
+  (let ((missing (expand-file-name "orgx-fill-does-not-exist.org" temporary-file-directory)))
+    (should-error (orgx-mcp-test--call "org_fill_file" (list :file missing)))))
+
+(ert-deftest orgx-mcp-fill-file-refuses-modified-buffer-test ()
+  (orgx-mcp-test--with-fill-file f (concat orgx-mcp-test--long "\n")
+    (with-current-buffer (find-file-noselect f)
+      (insert "unsaved ")
+      (should (buffer-modified-p)))
+    (should-error (orgx-mcp-test--call "org_fill_file" (list :file f)))
+    (should (equal (orgx-mcp-test--read f) (concat orgx-mcp-test--long "\n")))))
+
+(ert-deftest orgx-mcp-fill-file-reverts-visiting-buffer-test ()
+  (orgx-mcp-test--with-fill-file f (concat orgx-mcp-test--long "\n")
+    (let ((buf (find-file-noselect f)))
+      (orgx-mcp-test--call "org_fill_file" (list :file f :column 30))
+      (with-current-buffer buf
+        (should-not (buffer-modified-p))
+        (should (equal (buffer-string) (orgx-mcp-test--read f)))
+        (should (seq-every-p (lambda (l) (<= (length l) 30))
+                             (split-string (buffer-string) "\n")))))))
+
+(ert-deftest orgx-mcp-fill-file-honors-registered-policy-test ()
+  (orgx-mcp-test--with-fill-file f (concat "keep " orgx-mcp-test--long "\n\n" orgx-mcp-test--long "\n")
+    (let ((orgx-fill-suppress-functions (list (lambda () (looking-at-p "keep")))))
+      (orgx-mcp-test--call "org_fill_file" (list :file f :column 30)))
+    (let ((out (orgx-mcp-test--read f)))
+      (should (string-prefix-p (concat "keep " orgx-mcp-test--long "\n\n") out))
+      (should-not (string-match-p (concat "^" orgx-mcp-test--long "$") out)))))
 
 ;;; orgx-mcp-test.el ends here
