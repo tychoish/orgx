@@ -163,6 +163,26 @@
       (orgx-setup))
     (setq orgx-global--initialized t)))
 
+(defcustom orgx-global-warm-delay 2
+  "Idle seconds before `orgx-global-mode' registers capture and agenda setup.
+Nil disables the warm-up, leaving setup to the first Org buffer, capture or
+agenda."
+  :type '(choice (const :tag "Disabled" nil) number)
+  :group 'orgx)
+
+(defvar orgx-global--warm-timer nil
+  "Pending idle timer for `orgx-global--warm'.")
+
+(defun orgx-global--warm ()
+  "Register capture templates and agenda commands without waiting for first use.
+Other consumers (capture selectors, queues, MCP tools) read
+`org-capture-templates' without going through `org-capture'."
+  (setq orgx-global--warm-timer nil)
+  (when orgx-global-mode
+    (orgx-global--ensure-setup)
+    (orgx--setup-capture-once)
+    (orgx--setup-agenda-once)))
+
 (defun orgx-global--org-mode-setup ()
   "Initialize Orgx for the first Org buffer."
   (unless orgx-global--initialized
@@ -199,7 +219,13 @@
         (advice-add 'orgx-capture :before #'orgx-global--before-capture)
         (when (and (featurep 'org)
                    (or (featurep 'orgx) (not load-in-progress)))
-          (orgx-global--ensure-setup)))
+          (orgx-global--ensure-setup))
+        (when (and orgx-global-warm-delay (not orgx-global--warm-timer))
+          (setq orgx-global--warm-timer
+                (run-with-idle-timer orgx-global-warm-delay nil #'orgx-global--warm))))
+    (when (timerp orgx-global--warm-timer)
+      (cancel-timer orgx-global--warm-timer))
+    (setq orgx-global--warm-timer nil)
     (setq orgx-global--initialized nil)
     (remove-hook 'org-mode-hook #'orgx-global--org-mode-setup)
     (advice-remove 'org-agenda #'orgx-global--before-agenda)
