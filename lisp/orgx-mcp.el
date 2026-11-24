@@ -49,6 +49,8 @@
         :description "Org capture and bulk task operations"))
   "The orgx `mcpkit-service' instance.")
 
+(mcpkit-register-autostart 'orgx :on-collision 'namespace)
+
 ;;; Capture
 
 (defun orgx-mcp-capture-target (keys)
