@@ -42,6 +42,7 @@
 (require 'orgx-bulk-agenda)
 (require 'orgx-bulk-buffer)
 (require 'orgx-denote)
+(require 'orgx-fill)
 
 (defvar orgx-mcp-service
   (or (mcpkit-get-service 'orgx)
@@ -453,6 +454,27 @@ KEYS are the required string arguments.  FILE must be allowed (see
            (entry (orgx-entry-read-in-file
                    file (plist-get args :match_property) (plist-get args :match_value))))
       (orgx-mcp--entry-json entry file))))
+
+;;; Filling
+
+(mcpkit-register-tool 'org_fill_file 'orgx
+  :description "Fill (re-wrap) paragraphs of FILE with Emacs' fill-paragraph, leaving headings, keywords, drawers and source/example blocks untouched, plus whatever other modes (e.g. markdown) have registered with orgx-fill. Saves unless DRY_RUN is true."
+  :input-schema '(:type "object"
+                  :properties (:file (:type "string" :description "Path to the file to fill")
+                               :column (:type "integer" :description "Fill column, defaults to 72")
+                               :dry_run (:type "boolean" :description "Report whether the file would change without writing"))
+                  :required ["file"])
+  (let ((path (expand-file-name (plist-get args :file))))
+    (unless (file-exists-p path)
+      (user-error "File not found: %s" path))
+    (with-temp-buffer
+      (insert-file-contents path)
+      (let ((buffer-file-name path))
+        (set-auto-mode))
+      (let ((changed (orgx-fill-buffer (plist-get args :column))))
+        (when (and changed (not (eq (plist-get args :dry_run) t)))
+          (write-region (point-min) (point-max) path))
+        (list :file path :changed (if changed t :false))))))
 
 (provide 'orgx-mcp)
 ;;; orgx-mcp.el ends here
