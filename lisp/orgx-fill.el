@@ -35,8 +35,13 @@
 
 (defcustom orgx-fill-org-element-types
   '(headline keyword property-drawer node-property drawer planning clock
-    babel-call src-block example-block export-block fixed-width)
-  "Org element types that `fill-paragraph' must leave untouched."
+    babel-call src-block example-block export-block fixed-width verse-block
+    comment-block latex-environment table table-row quote-block special-block
+    center-block dynamic-block)
+  "Org element types that `fill-paragraph' must leave untouched.
+Greater blocks (quote, special, center, dynamic) are listed so that
+their opening line is skipped on its own and `orgx-fill-buffer' then
+descends into their contents instead of skipping the whole block."
   :type '(repeat symbol)
   :group 'orgx-fill)
 
@@ -86,22 +91,27 @@ own paragraph rules."
 
 (defun orgx-fill-buffer (&optional column)
   "Fill every paragraph in the current buffer to COLUMN under the policy.
-COLUMN defaults to `orgx-fill-column'.  Return non-nil when the buffer
-changed."
+COLUMN defaults to `orgx-fill-column'.  Point is preserved.  Return
+non-nil when the buffer changed."
   (let ((fill-column (or column orgx-fill-column))
         (before (buffer-hash)))
-    (goto-char (point-min))
-    (while (not (eobp))
-      (cond
-       ((looking-at-p "[ \t]*$")
-        (forward-line 1))
-       ((or (orgx-fill-handled-p) (orgx-fill-suppressed-p))
-        (forward-line 1))
-       (t
-        (fill-paragraph)
-        (forward-paragraph)
-        (unless (bolp)
-          (forward-line 1)))))
+    (save-excursion
+      (goto-char (point-min))
+      (while (not (eobp))
+        (let ((start (point)))
+          (cond
+           ((looking-at-p "[ \t]*$")
+            (forward-line 1))
+           ((or (orgx-fill-handled-p) (orgx-fill-suppressed-p))
+            (forward-line 1))
+           (t
+            (fill-paragraph)
+            (forward-paragraph)
+            (unless (bolp)
+              (forward-line 1))))
+          (when (<= (point) start)
+            (goto-char start)
+            (forward-line 1)))))
     (not (equal before (buffer-hash)))))
 
 (defun ad:orgx-fill-guard (fn &rest args)
