@@ -246,9 +246,9 @@
     (unwind-protect
         (progn
           (orgx-fill-guard-mode 1)
-          (should (advice-member-p #'ad:orgx-fill-guard 'fill-paragraph))
+          (should (advice-member-p #'orgx-fill--ad-guard 'fill-paragraph))
           (orgx-fill-guard-mode -1)
-          (should-not (advice-member-p #'ad:orgx-fill-guard 'fill-paragraph)))
+          (should-not (advice-member-p #'orgx-fill--ad-guard 'fill-paragraph)))
       (orgx-fill-guard-mode -1))))
 
 (ert-deftest orgx-fill-guard-mode-blocks-fill-paragraph-on-structure ()
@@ -283,13 +283,13 @@
     (unwind-protect
         (progn
           (orgx-fill-guard-mode 1)
-          (should (advice-member-p #'ad:orgx-fill-guard 'fill-region))
+          (should (advice-member-p #'orgx-fill--ad-guard 'fill-region))
           (orgx-fill-guard-mode -1)
-          (should-not (advice-member-p #'ad:orgx-fill-guard 'fill-region)))
+          (should-not (advice-member-p #'orgx-fill--ad-guard 'fill-region)))
       (orgx-fill-guard-mode -1))))
 
 (ert-deftest orgx-fill-guard-mode-loading-installs-nothing ()
-  (should-not (advice-member-p #'ad:orgx-fill-guard 'fill-paragraph)))
+  (should-not (advice-member-p #'orgx-fill--ad-guard 'fill-paragraph)))
 
 ;;; Markdown
 
@@ -346,7 +346,7 @@ Skips the test when markdown-mode is not installed."
       (should (equal (buffer-string) text)))))
 
 (ert-deftest orgx-fill-markdown-frontmatter-fills-folded-scalars ()
-  (skip-unless (treesit-language-available-p 'yaml))
+  (skip-unless (and (fboundp 'treesit-language-available-p) (treesit-language-available-p 'yaml)))
   (orgx-fill-test--with-markdown (concat "---\ndesc: >\n  " orgx-fill-test--long
                                          "\n\n  second paragraph " orgx-fill-test--long
                                          "\nafter: " orgx-fill-test--long "\n---\n")
@@ -357,7 +357,7 @@ Skips the test when markdown-mode is not installed."
     (should-not (orgx-fill-buffer 30))))
 
 (ert-deftest orgx-fill-markdown-guard-mode-covers-markdown-fill-paragraph ()
-  (skip-unless (treesit-language-available-p 'yaml))
+  (skip-unless (and (fboundp 'treesit-language-available-p) (treesit-language-available-p 'yaml)))
   (unwind-protect
       (progn
         (orgx-fill-guard-mode 1)

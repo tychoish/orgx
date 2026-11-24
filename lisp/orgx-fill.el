@@ -2,7 +2,6 @@
 
 ;; Author: tychoish <tychoish@tychoish.com>
 ;; URL: https://github.com/tychoish/orgx
-;; Package-Requires: ((emacs "29.1") (org "9.6"))
 ;; Keywords: org, text, convenience
 
 ;;; Commentary:
@@ -186,7 +185,7 @@ non-nil when the buffer changed."
             (forward-line 1)))))
     (not (equal before (buffer-hash)))))
 
-(defun ad:orgx-fill-guard (fn &rest args)
+(defun orgx-fill--ad-guard (fn &rest args)
   "Around advice for FN: apply the fill policy before filling with ARGS."
   (or (orgx-fill-handled-p)
       (orgx-fill-suppressed-p)
@@ -199,8 +198,8 @@ non-nil when the buffer changed."
   :group 'orgx-fill
   (seq-do (lambda (fn)
             (if orgx-fill-guard-mode
-                (advice-add fn :around #'ad:orgx-fill-guard)
-              (advice-remove fn #'ad:orgx-fill-guard)))
+                (advice-add fn :around #'orgx-fill--ad-guard)
+              (advice-remove fn #'orgx-fill--ad-guard)))
           orgx-fill-advised-functions))
 
 (provide 'orgx-fill)
