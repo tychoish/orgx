@@ -180,8 +180,17 @@ Other consumers (capture selectors, queues, MCP tools) read
   (setq orgx-global--warm-timer nil)
   (when orgx-global-mode
     (orgx-global--ensure-setup)
-    (orgx--setup-capture-once)
-    (orgx--setup-agenda-once)))
+    (orgx--setup-capture-once)))
+
+(defun orgx-global--after-agenda-load (&rest _)
+  "Register Denote agenda commands once `org-agenda' has loaded.
+Self-removing member of `after-load-functions'; a no-op until the feature
+is provided."
+  (when (featurep 'org-agenda)
+    (remove-hook 'after-load-functions #'orgx-global--after-agenda-load)
+    (when orgx-global-mode
+      (orgx-global--ensure-setup)
+      (orgx--setup-agenda-once))))
 
 (defun orgx-global--org-mode-setup ()
   "Initialize Orgx for the first Org buffer."
@@ -220,6 +229,10 @@ Other consumers (capture selectors, queues, MCP tools) read
         (when (and (featurep 'org)
                    (or (featurep 'orgx) (not load-in-progress)))
           (orgx-global--ensure-setup))
+        (if (and (featurep 'org-agenda)
+                 (or (featurep 'orgx) (not load-in-progress)))
+            (orgx-global--after-agenda-load)
+          (add-hook 'after-load-functions #'orgx-global--after-agenda-load))
         (when (and orgx-global-warm-delay (not orgx-global--warm-timer))
           (setq orgx-global--warm-timer
                 (run-with-idle-timer orgx-global-warm-delay nil #'orgx-global--warm))))
@@ -228,6 +241,7 @@ Other consumers (capture selectors, queues, MCP tools) read
     (setq orgx-global--warm-timer nil)
     (setq orgx-global--initialized nil)
     (remove-hook 'org-mode-hook #'orgx-global--org-mode-setup)
+    (remove-hook 'after-load-functions #'orgx-global--after-agenda-load)
     (advice-remove 'org-agenda #'orgx-global--before-agenda)
     (advice-remove 'org-capture #'orgx-global--before-capture)
     (advice-remove 'orgx-capture #'orgx-global--before-capture)

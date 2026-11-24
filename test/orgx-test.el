@@ -486,6 +486,33 @@ Other tests may leave `orgx-mode-turn-on' on the hook."
             (should-not called))
         (orgx-global-mode -1)))))
 
+(ert-deftest orgx-global-mode-registers-agenda-on-agenda-load-test ()
+  "Agenda commands register when `org-agenda' loads, not on the idle warm timer."
+  (let ((orgx-global-mode nil)
+        (orgx-global--initialized nil)
+        (orgx-global-warm-delay nil)
+        (after-load-functions nil)
+        (registered nil))
+    (cl-letf (((symbol-function 'orgx-global--ensure-setup) #'ignore)
+              ((symbol-function 'orgx--setup-agenda-once)
+               (lambda (&rest _) (setq registered t)))
+              ((symbol-function 'featurep)
+               (let ((original (symbol-function 'featurep)))
+                 (lambda (feature &optional subfeature)
+                   (and (not (eq feature 'org-agenda))
+                        (funcall original feature subfeature))))))
+      (unwind-protect
+          (progn
+            (orgx-global-mode 1)
+            (should-not registered)
+            (should (memq 'orgx-global--after-agenda-load after-load-functions))
+            (cl-letf (((symbol-function 'featurep)
+                       (lambda (&rest _) t)))
+              (run-hook-with-args 'after-load-functions "org-agenda"))
+            (should registered)
+            (should-not (memq 'orgx-global--after-agenda-load after-load-functions)))
+        (orgx-global-mode -1)))))
+
 (ert-deftest orgx-global-mode-preserves-prior-local-setup-test ()
   "Global activation must not overwrite a prior local setup's saved values."
   (let ((org-agenda-sticky nil)
@@ -642,6 +669,7 @@ Other tests may leave `orgx-mode-turn-on' on the hook."
   (let ((orgx-global-mode nil)
         (orgx--setup-done nil)
         (orgx-setup-hook nil)
+        (after-load-functions nil)
         (events nil))
     (cl-letf (((symbol-function 'orgx-capture-setup-standard-templates)
                (lambda () (push 'capture-setup events)))
@@ -653,7 +681,13 @@ Other tests may leave `orgx-mode-turn-on' on the hook."
                (lambda (&rest _) (push 'agenda events))))
       (unwind-protect
           (progn
-            (orgx-global-mode 1)
+            ;; with `org-agenda' not yet loaded, agenda setup waits for first use
+            (cl-letf (((symbol-function 'featurep)
+                       (let ((original (symbol-function 'featurep)))
+                         (lambda (feature &optional subfeature)
+                           (and (not (eq feature 'org-agenda))
+                                (funcall original feature subfeature))))))
+              (orgx-global-mode 1))
             (should-not events)
             (org-capture)
             (org-capture)
