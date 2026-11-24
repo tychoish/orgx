@@ -292,36 +292,20 @@
   (should-not (advice-member-p #'orgx-fill--ad-guard 'fill-paragraph)))
 
 ;;; Markdown
+;;
+;; Tests that need markdown-mode or the tree-sitter yaml grammar are defined
+;; only when those are available.  They are not skipped at run time: a
+;; `skip-unless' aborts the run under the CI coverage runner on Emacs 29.4.
 
-(defmacro orgx-fill-test--with-markdown (text &rest body)
-  "Run BODY in a `markdown-mode' temp buffer holding TEXT, point at the start.
-Skips the test when markdown-mode is not installed."
-  (declare (indent 1))
-  `(progn
-     (skip-unless (locate-library "markdown-mode"))
-     (require 'markdown-mode)
-     (with-temp-buffer
-       (markdown-mode)
-       (insert ,text)
-       (goto-char (point-min))
-       ,@body)))
+(defconst orgx-fill-test--markdown-available (and (locate-library "markdown-mode") t)
+  "Non-nil when markdown-mode is installed.")
 
-(ert-deftest orgx-fill-markdown-fills-prose-only ()
-  (orgx-fill-test--with-markdown (concat "# " orgx-fill-test--long "\n\n```\n"
-                                         orgx-fill-test--long "\n```\n\n"
-                                         orgx-fill-test--long "\n")
-    (should (orgx-fill-buffer 30))
-    (should (string-match-p (concat "^# " orgx-fill-test--long "$") (buffer-string)))
-    (should (string-match-p (concat "^" orgx-fill-test--long "\n```") (buffer-string)))
-    (should (string-suffix-p (concat orgx-fill-test--filled "\n") (buffer-string)))))
-
-(ert-deftest orgx-fill-markdown-suppressed-p-by-context ()
-  (orgx-fill-test--with-markdown (concat "# Heading\n\n```\ncode\n```\n\nprose\n")
-    (should (orgx-fill-markdown-suppressed-p))
-    (re-search-forward "^code")
-    (should (orgx-fill-markdown-suppressed-p))
-    (re-search-forward "^prose")
-    (should-not (orgx-fill-markdown-suppressed-p))))
+(defconst orgx-fill-test--yaml-available
+  (and orgx-fill-test--markdown-available
+       (fboundp 'treesit-language-available-p)
+       (treesit-language-available-p 'yaml)
+       t)
+  "Non-nil when markdown-mode and the tree-sitter yaml grammar are available.")
 
 (ert-deftest orgx-fill-markdown-suppressed-p-ignores-other-modes ()
   (with-temp-buffer
@@ -330,48 +314,82 @@ Skips the test when markdown-mode is not installed."
     (should-not (orgx-fill-markdown-suppressed-p))
     (should-not (orgx-fill-markdown-fill-folded-scalar))))
 
-(ert-deftest orgx-fill-markdown-frontmatter-p-bounds ()
-  (orgx-fill-test--with-markdown "---\ntitle: x\n---\n\nbody\n"
-    (should (orgx-fill-markdown-frontmatter-p))
-    (re-search-forward "^title")
-    (should (orgx-fill-markdown-frontmatter-p))
-    (re-search-forward "^body")
-    (should-not (orgx-fill-markdown-frontmatter-p))))
+(when orgx-fill-test--markdown-available
+  (require 'markdown-mode)
 
-(ert-deftest orgx-fill-markdown-frontmatter-leaves-plain-and-literal-values ()
-  (let ((text (concat "---\ntitle: " orgx-fill-test--long "\nlit: |\n  "
-                      orgx-fill-test--long "\n---\n")))
-    (orgx-fill-test--with-markdown text
-      (should-not (orgx-fill-buffer 30))
-      (should (equal (buffer-string) text)))))
+  (defmacro orgx-fill-test--with-markdown (text &rest body)
+    "Run BODY in a `markdown-mode' temp buffer holding TEXT, point at the start."
+    (declare (indent 1))
+    `(with-temp-buffer
+       (markdown-mode)
+       (insert ,text)
+       (goto-char (point-min))
+       ,@body))
 
-(ert-deftest orgx-fill-markdown-frontmatter-fills-folded-scalars ()
-  (skip-unless (and (fboundp 'treesit-language-available-p) (treesit-language-available-p 'yaml)))
-  (orgx-fill-test--with-markdown (concat "---\ndesc: >\n  " orgx-fill-test--long
-                                         "\n\n  second paragraph " orgx-fill-test--long
-                                         "\nafter: " orgx-fill-test--long "\n---\n")
-    (should (orgx-fill-buffer 30))
-    (should (string-match-p "^desc: >\n  foo bar baz qux quux corge\n  grault garply waldo fred\n\n  second paragraph"
-                            (buffer-string)))
-    (should (string-match-p (concat "^after: " orgx-fill-test--long "$") (buffer-string)))
-    (should-not (orgx-fill-buffer 30))))
+  (ert-deftest orgx-fill-markdown-fills-prose-only ()
+    (orgx-fill-test--with-markdown (concat "# " orgx-fill-test--long "\n\n```\n"
+                                           orgx-fill-test--long "\n```\n\n"
+                                           orgx-fill-test--long "\n")
+      (should (orgx-fill-buffer 30))
+      (should (string-match-p (concat "^# " orgx-fill-test--long "$") (buffer-string)))
+      (should (string-match-p (concat "^" orgx-fill-test--long "\n```") (buffer-string)))
+      (should (string-suffix-p (concat orgx-fill-test--filled "\n") (buffer-string)))))
 
-(ert-deftest orgx-fill-markdown-guard-mode-covers-markdown-fill-paragraph ()
-  (skip-unless (and (fboundp 'treesit-language-available-p) (treesit-language-available-p 'yaml)))
-  (unwind-protect
-      (progn
-        (orgx-fill-guard-mode 1)
-        (orgx-fill-test--with-markdown (concat "# " orgx-fill-test--long "\n")
-          (let ((fill-column 30))
-            (fill-paragraph))
-          (should (equal (buffer-string) (concat "# " orgx-fill-test--long "\n"))))
-        (orgx-fill-test--with-markdown (concat "---\ndesc: >\n  " orgx-fill-test--long "\n---\n")
-          (let ((fill-column 30))
-            (goto-char (point-min))
-            (forward-line 2)
-            (fill-paragraph))
-          (should (string-match-p "^  grault" (buffer-string)))))
-    (orgx-fill-guard-mode -1)))
+  (ert-deftest orgx-fill-markdown-suppressed-p-by-context ()
+    (orgx-fill-test--with-markdown (concat "# Heading\n\n```\ncode\n```\n\nprose\n")
+      (should (orgx-fill-markdown-suppressed-p))
+      (re-search-forward "^code")
+      (should (orgx-fill-markdown-suppressed-p))
+      (re-search-forward "^prose")
+      (should-not (orgx-fill-markdown-suppressed-p))))
+
+  (ert-deftest orgx-fill-markdown-frontmatter-p-bounds ()
+    (orgx-fill-test--with-markdown "---\ntitle: x\n---\n\nbody\n"
+      (should (orgx-fill-markdown-frontmatter-p))
+      (re-search-forward "^title")
+      (should (orgx-fill-markdown-frontmatter-p))
+      (re-search-forward "^body")
+      (should-not (orgx-fill-markdown-frontmatter-p))))
+
+  (ert-deftest orgx-fill-markdown-frontmatter-leaves-plain-and-literal-values ()
+    (let ((text (concat "---\ntitle: " orgx-fill-test--long "\nlit: |\n  "
+                        orgx-fill-test--long "\n---\n")))
+      (orgx-fill-test--with-markdown text
+        (should-not (orgx-fill-buffer 30))
+        (should (equal (buffer-string) text)))))
+
+  (ert-deftest orgx-fill-markdown-guard-mode-skips-headings ()
+    (unwind-protect
+        (progn
+          (orgx-fill-guard-mode 1)
+          (orgx-fill-test--with-markdown (concat "# " orgx-fill-test--long "\n")
+            (let ((fill-column 30))
+              (fill-paragraph))
+            (should (equal (buffer-string) (concat "# " orgx-fill-test--long "\n")))))
+      (orgx-fill-guard-mode -1))))
+
+(when orgx-fill-test--yaml-available
+  (ert-deftest orgx-fill-markdown-frontmatter-fills-folded-scalars ()
+    (orgx-fill-test--with-markdown (concat "---\ndesc: >\n  " orgx-fill-test--long
+                                           "\n\n  second paragraph " orgx-fill-test--long
+                                           "\nafter: " orgx-fill-test--long "\n---\n")
+      (should (orgx-fill-buffer 30))
+      (should (string-match-p "^desc: >\n  foo bar baz qux quux corge\n  grault garply waldo fred\n\n  second paragraph"
+                              (buffer-string)))
+      (should (string-match-p (concat "^after: " orgx-fill-test--long "$") (buffer-string)))
+      (should-not (orgx-fill-buffer 30))))
+
+  (ert-deftest orgx-fill-markdown-guard-mode-fills-folded-scalars ()
+    (unwind-protect
+        (progn
+          (orgx-fill-guard-mode 1)
+          (orgx-fill-test--with-markdown (concat "---\ndesc: >\n  " orgx-fill-test--long "\n---\n")
+            (let ((fill-column 30))
+              (goto-char (point-min))
+              (forward-line 2)
+              (fill-paragraph))
+            (should (string-match-p "^  grault" (buffer-string)))))
+      (orgx-fill-guard-mode -1))))
 
 (ert-deftest orgx-fill-org-buffers-do-not-need-markdown-mode ()
   "Org filling must not call into markdown-mode."
