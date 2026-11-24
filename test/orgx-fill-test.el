@@ -6,6 +6,7 @@
 ;;; Code:
 
 (require 'ert)
+(require 'cl-lib)
 (require 'org)
 (require 'orgx-fill)
 
@@ -100,9 +101,15 @@
   (let ((orgx-fill-handlers nil))
     (should-not (orgx-fill-handled-p))))
 
-(ert-deftest orgx-fill-default-suppress-functions-include-org ()
+(ert-deftest orgx-fill-defaults-cover-org-and-markdown ()
   (should (memq #'orgx-fill-org-suppressed-p
-                (default-value 'orgx-fill-suppress-functions))))
+                (default-value 'orgx-fill-suppress-functions)))
+  (should (memq #'orgx-fill-markdown-suppressed-p
+                (default-value 'orgx-fill-suppress-functions)))
+  (should (memq #'orgx-fill-markdown-fill-folded-scalar
+                (default-value 'orgx-fill-handlers)))
+  (should (memq 'markdown-fill-paragraph
+                (default-value 'orgx-fill-advised-functions))))
 
 ;;; Helpers
 
@@ -283,6 +290,97 @@
 
 (ert-deftest orgx-fill-guard-mode-loading-installs-nothing ()
   (should-not (advice-member-p #'ad:orgx-fill-guard 'fill-paragraph)))
+
+;;; Markdown
+
+(defmacro orgx-fill-test--with-markdown (text &rest body)
+  "Run BODY in a `markdown-mode' temp buffer holding TEXT, point at the start.
+Skips the test when markdown-mode is not installed."
+  (declare (indent 1))
+  `(progn
+     (skip-unless (locate-library "markdown-mode"))
+     (require 'markdown-mode)
+     (with-temp-buffer
+       (markdown-mode)
+       (insert ,text)
+       (goto-char (point-min))
+       ,@body)))
+
+(ert-deftest orgx-fill-markdown-fills-prose-only ()
+  (orgx-fill-test--with-markdown (concat "# " orgx-fill-test--long "\n\n```\n"
+                                         orgx-fill-test--long "\n```\n\n"
+                                         orgx-fill-test--long "\n")
+    (should (orgx-fill-buffer 30))
+    (should (string-match-p (concat "^# " orgx-fill-test--long "$") (buffer-string)))
+    (should (string-match-p (concat "^" orgx-fill-test--long "\n```") (buffer-string)))
+    (should (string-suffix-p (concat orgx-fill-test--filled "\n") (buffer-string)))))
+
+(ert-deftest orgx-fill-markdown-suppressed-p-by-context ()
+  (orgx-fill-test--with-markdown (concat "# Heading\n\n```\ncode\n```\n\nprose\n")
+    (should (orgx-fill-markdown-suppressed-p))
+    (re-search-forward "^code")
+    (should (orgx-fill-markdown-suppressed-p))
+    (re-search-forward "^prose")
+    (should-not (orgx-fill-markdown-suppressed-p))))
+
+(ert-deftest orgx-fill-markdown-suppressed-p-ignores-other-modes ()
+  (with-temp-buffer
+    (text-mode)
+    (insert "# not markdown\n")
+    (should-not (orgx-fill-markdown-suppressed-p))
+    (should-not (orgx-fill-markdown-fill-folded-scalar))))
+
+(ert-deftest orgx-fill-markdown-frontmatter-p-bounds ()
+  (orgx-fill-test--with-markdown "---\ntitle: x\n---\n\nbody\n"
+    (should (orgx-fill-markdown-frontmatter-p))
+    (re-search-forward "^title")
+    (should (orgx-fill-markdown-frontmatter-p))
+    (re-search-forward "^body")
+    (should-not (orgx-fill-markdown-frontmatter-p))))
+
+(ert-deftest orgx-fill-markdown-frontmatter-leaves-plain-and-literal-values ()
+  (let ((text (concat "---\ntitle: " orgx-fill-test--long "\nlit: |\n  "
+                      orgx-fill-test--long "\n---\n")))
+    (orgx-fill-test--with-markdown text
+      (should-not (orgx-fill-buffer 30))
+      (should (equal (buffer-string) text)))))
+
+(ert-deftest orgx-fill-markdown-frontmatter-fills-folded-scalars ()
+  (skip-unless (treesit-language-available-p 'yaml))
+  (orgx-fill-test--with-markdown (concat "---\ndesc: >\n  " orgx-fill-test--long
+                                         "\n\n  second paragraph " orgx-fill-test--long
+                                         "\nafter: " orgx-fill-test--long "\n---\n")
+    (should (orgx-fill-buffer 30))
+    (should (string-match-p "^desc: >\n  foo bar baz qux quux corge\n  grault garply waldo fred\n\n  second paragraph"
+                            (buffer-string)))
+    (should (string-match-p (concat "^after: " orgx-fill-test--long "$") (buffer-string)))
+    (should-not (orgx-fill-buffer 30))))
+
+(ert-deftest orgx-fill-markdown-guard-mode-covers-markdown-fill-paragraph ()
+  (skip-unless (treesit-language-available-p 'yaml))
+  (unwind-protect
+      (progn
+        (orgx-fill-guard-mode 1)
+        (orgx-fill-test--with-markdown (concat "# " orgx-fill-test--long "\n")
+          (let ((fill-column 30))
+            (fill-paragraph))
+          (should (equal (buffer-string) (concat "# " orgx-fill-test--long "\n"))))
+        (orgx-fill-test--with-markdown (concat "---\ndesc: >\n  " orgx-fill-test--long "\n---\n")
+          (let ((fill-column 30))
+            (goto-char (point-min))
+            (forward-line 2)
+            (fill-paragraph))
+          (should (string-match-p "^  grault" (buffer-string)))))
+    (orgx-fill-guard-mode -1)))
+
+(ert-deftest orgx-fill-org-buffers-do-not-need-markdown-mode ()
+  "Org filling must not call into markdown-mode."
+  (cl-letf (((symbol-function 'markdown-text-property-at-point)
+             (lambda (&rest _) (error "markdown-mode called from org buffer")))
+            ((symbol-function 'markdown-code-block-at-point-p)
+             (lambda (&rest _) (error "markdown-mode called from org buffer"))))
+    (orgx-fill-test--with-org (concat "* H\n" orgx-fill-test--long "\n")
+      (should (orgx-fill-buffer 30)))))
 
 (provide 'orgx-fill-test)
 ;;; orgx-fill-test.el ends here

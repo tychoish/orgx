@@ -11,7 +11,10 @@
 ;;
 ;; Org structure is covered here: headings, keyword lines, drawers,
 ;; planning and clock lines, and source/example/export/fixed-width
-;; blocks.  Other modes plug in through two lists:
+;; blocks.  Markdown headings, code blocks and YAML front matter are
+;; covered too (folded `>' scalars in front matter are filled), using
+;; markdown-mode and tree-sitter only when a markdown buffer is involved.
+;; Other modes plug in through two lists:
 ;;
 ;; - `orgx-fill-suppress-functions': predicates of no arguments; any
 ;;   non-nil result means "do not fill at point".
@@ -56,15 +59,84 @@ descends into their contents instead of skipping the whole block."
        (memq (org-element-type (org-element-at-point))
              orgx-fill-org-element-types)))
 
-(defvar orgx-fill-suppress-functions '(orgx-fill-org-suppressed-p)
+(defvar orgx-fill-suppress-functions
+  '(orgx-fill-org-suppressed-p orgx-fill-markdown-suppressed-p)
   "Predicates of no arguments; any non-nil result suppresses filling at point.")
 
-(defvar orgx-fill-handlers nil
+(defvar orgx-fill-handlers '(orgx-fill-markdown-fill-folded-scalar)
   "Functions of no arguments that fill a special region at point.
 Each returns non-nil when it handled filling.")
 
-(defvar orgx-fill-advised-functions '(fill-paragraph)
+(defvar orgx-fill-advised-functions '(fill-paragraph markdown-fill-paragraph)
   "Functions `orgx-fill-guard-mode' wraps with the fill policy.")
+
+;;; Markdown
+
+;; Soft dependency: markdown-mode and the tree-sitter yaml grammar are only
+;; touched after `derived-mode-p' confirms a markdown buffer, which implies
+;; markdown-mode is loaded.  Without the yaml grammar, front matter is left
+;; unfilled.
+
+(declare-function markdown-code-block-at-point-p "markdown-mode")
+(declare-function markdown-heading-at-point "markdown-mode")
+(declare-function markdown-text-property-at-point "markdown-mode")
+(declare-function treesit-language-available-p "treesit")
+(declare-function treesit-parser-create "treesit")
+(declare-function treesit-parser-set-included-ranges "treesit")
+(declare-function treesit-parser-root-node "treesit")
+(declare-function treesit-node-descendant-for-range "treesit")
+(declare-function treesit-parent-until "treesit")
+(declare-function treesit-node-type "treesit")
+(declare-function treesit-node-start "treesit")
+(declare-function treesit-node-end "treesit")
+
+(defun orgx-fill-markdown-frontmatter-p ()
+  "Return non-nil when point is in a markdown YAML front matter block."
+  (syntax-propertize (line-end-position))
+  (seq-some #'markdown-text-property-at-point
+            '(markdown-yaml-metadata-section
+              markdown-yaml-metadata-begin
+              markdown-yaml-metadata-end)))
+
+(defun orgx-fill-yaml-folded-scalar-bounds ()
+  "Return (BEG END INDENT) of the folded (`>') scalar body at point.
+Uses the tree-sitter yaml grammar over the front matter section; return
+nil when point is not in a folded scalar or the grammar is missing."
+  (when-let* ((section (markdown-text-property-at-point 'markdown-yaml-metadata-section))
+              ((treesit-language-available-p 'yaml))
+              (parser (treesit-parser-create 'yaml nil nil 'front-matter))
+              (node (progn
+                      (treesit-parser-set-included-ranges
+                       parser (list (cons (car section) (cadr section))))
+                      (treesit-parent-until
+                       (treesit-node-descendant-for-range
+                        (treesit-parser-root-node parser) (point) (point) t)
+                       (lambda (n) (equal (treesit-node-type n) "block_scalar"))
+                       t)))
+              ((eq (char-after (treesit-node-start node)) ?>)))
+    (save-excursion
+      (goto-char (treesit-node-start node))
+      (forward-line 1)
+      (list (point) (treesit-node-end node) (current-indentation)))))
+
+(defun orgx-fill-markdown-suppressed-p ()
+  "Return non-nil on markdown headings, code blocks and front matter.
+Folded YAML scalars in front matter are not suppressed; see
+`orgx-fill-markdown-fill-folded-scalar'."
+  (and (derived-mode-p 'markdown-mode)
+       (if (orgx-fill-markdown-frontmatter-p)
+           (not (orgx-fill-yaml-folded-scalar-bounds))
+         (or (markdown-code-block-at-point-p)
+             (markdown-heading-at-point)))))
+
+(defun orgx-fill-markdown-fill-folded-scalar ()
+  "Fill the folded YAML scalar at point in markdown front matter.
+Return non-nil when point was in one."
+  (when-let* (((derived-mode-p 'markdown-mode))
+              ((orgx-fill-markdown-frontmatter-p))
+              (bounds (orgx-fill-yaml-folded-scalar-bounds)))
+    (apply #'orgx-fill-with-prefix bounds)
+    t))
 
 (defun orgx-fill-suppressed-p ()
   "Return non-nil when any of `orgx-fill-suppress-functions' says to skip."
