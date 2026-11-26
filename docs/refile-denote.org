@@ -1,0 +1,29 @@
+#+title: Refile to Denote
+#+author: tychoish
+#+language: en
+
+=orgx-refile-denote.el= adds Denote targets to ~org-refile~ (=C-c o w=, and =r= in the agenda via ~org-agenda-refile~).
+
+* Usage
+
+Press ~org-refile~ on a heading. Besides the usual Org targets, the list contains:
+- =denote: (choose note)= :: prompts for an existing Denote note via ~denote-file-prompt~.
+- =denote: (new note)= :: extracts the subtree into a new Denote note via ~denote-convert-subtree~ or ~denote-org-extract-org-subtree~.
+- =denote: <note>= :: direct targets for active Denote Org files (when ~orgx-refile-denote-target-mode~ is ='both= or ='notes-only=).
+
+Choosing a note prompts for an optional heading inside that note (defaulting to =(top level)= to file as a top-level headline).
+
+* Standalone Command
+
+You can also refile directly to Denote using ~orgx-refile-denote~ (or its aliases ~orgx-denote-refile~, ~org-refile-to-denote~, ~denote-org-refile-to-denote~).
+Works both in Org buffers and in the Org agenda. With a numeric prefix argument of 3, copies the subtree instead of moving it.
+
+* Configuration
+
+- ~orgx-refile-denote-prefix~ (default ="denote:"=): Prefix of Denote entries in the refile target list.
+- ~orgx-refile-denote-target-mode~ (default ='both=): Set to ='both=, ='prompt-only=, or ='notes-only=.
+- ~orgx-refile-denote-prompt-heading~ (default =t=): When non-nil, prompts for an existing heading inside the chosen note. When nil, always refiles to the top level.
+
+* Setup
+
+~orgx-setup~ and ~orgx-global-mode~ enable the advice automatically. Use ~orgx-refile-denote-enable~ / ~orgx-refile-denote-disable~ directly otherwise.

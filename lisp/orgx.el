@@ -35,6 +35,7 @@
 (require 'annotated-completing-read)
 (require 'org-refile)
 (require 'orgx-refile-agent)
+(require 'orgx-refile-denote)
 (require 'org-agenda)
 (require 'org-archive)
 (require 'ob)
@@ -1127,7 +1128,8 @@ Activates `orgx-command-map' under \\`C-c o'."
   (advice-add 'org-table--shrink-field :filter-args #'orgx--ad-table-shrink-field)
   (advice-add 'org-get-agenda-file-buffer :filter-return #'orgx--ensure-agenda-file-buffer-mode)
   (add-hook 'org-open-link-functions #'orgx-open-custom-id-slug-fallback)
-  (orgx-refile-agent-enable))
+  (orgx-refile-agent-enable)
+  (orgx-refile-denote-enable))
 
 (defun orgx--disable-advice ()
   "Disable orgx advice and link hooks."
@@ -1145,7 +1147,8 @@ Activates `orgx-command-map' under \\`C-c o'."
   (advice-remove 'org-table--shrink-field #'orgx--ad-table-shrink-field)
   (advice-remove 'org-get-agenda-file-buffer #'orgx--ensure-agenda-file-buffer-mode)
   (remove-hook 'org-open-link-functions #'orgx-open-custom-id-slug-fallback)
-  (orgx-refile-agent-disable))
+  (orgx-refile-agent-disable)
+  (orgx-refile-denote-disable))
 
 (defun orgx--setup-modules-once (&rest _)
   "Load configured Org modules on the first Org buffer or agenda."

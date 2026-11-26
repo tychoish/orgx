@@ -747,5 +747,14 @@ in an `org-capture' buffer under the target."
                 :empty-lines 0))))
         (org-capture nil "o")))))
 
+(autoload 'orgx-refile-denote "orgx-refile-denote" nil t)
+
+;;;###autoload
+(defalias 'orgx-denote-refile #'orgx-refile-denote)
+
+(defalias 'org-refile-to-denote #'orgx-refile-denote)
+(defalias 'denote-org-refile-to-denote #'orgx-refile-denote)
+(defalias 'orgx-refile-to-denote #'orgx-refile-denote)
+
 (provide 'orgx-denote)
 ;;; orgx-denote.el ends here
