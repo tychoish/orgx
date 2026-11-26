@@ -4,6 +4,38 @@
 
 Org mode extensions, structured capture templates, continuous REPL capture shell, and native command-line tooling for Emacs.
 
+* Capture file registration
+
+Register a file and select its stock template families. Each family accepts
+=:headline=; nil or an empty string captures at file level. Journal and
+datetree families use Org's datetree target, optionally under that heading.
+
+#+begin_src emacs-lisp
+(orgx-capture-register-file
+ :path "agentic.org" :name "agentic" :key "a" :agenda t
+ :templates '((tasks :headline nil)
+              (journal :headline "Journal")))
+
+(orgx-capture-register-file
+ :path "work.org" :name "work" :key "w"
+ :templates '((inbox :headline "Incoming")
+              (notes :headline "Ideas")
+              tasks))
+#+end_src
+
+Available families are =inbox= (i keys), =notes= (n), =tasks= (t), and
+=journal= / =datetree= (j). Relative paths resolve under =org-directory=.
+Omitting =:templates= keeps the traditional notes, journal, and tasks set.
+The existing =orgx-capture-add-project-file-templates= entry point also
+accepts =:templates=. Ordinary =org-capture-templates= definitions and the
+individual family builders remain available. Registration preserves other
+keys and replaces entries for keys it generates when called again.
+
+Agent task placement in the standard set is controlled by
+=orgx-capture-default-agent-tasks-headline=. Set it to nil in personal
+settings for top-level tasks, then run
+=orgx-capture-setup-standard-templates= to refresh existing registrations.
+
 * Overview
 
 =orgx= is a dual-stack monorepo providing structured Org mode extensions and tooling:
