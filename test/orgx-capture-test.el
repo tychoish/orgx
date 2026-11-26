@@ -1,5 +1,8 @@
 ;;; orgx-capture-test.el --- Tests for orgx-capture.el -*- lexical-binding: t; -*-
 
+;;; Commentary:
+;; Capture builders, registration, and integration regression tests.
+
 ;;; Code:
 
 (require 'ert)
@@ -190,6 +193,109 @@ when no KEYS are supplied, and dispatches to it."
             (should (equal "* Tasks\n** TODO Task 3\n** TODO Task 2\n** TODO Task 1\n" content))))
       (when (file-exists-p temp-file)
         (delete-file temp-file)))))
+
+(ert-deftest orgx-capture-register-file-selective-test ()
+  "Register selected families without disturbing conventional templates."
+  (let* ((custom '("z" "custom" entry (file "/tmp/custom.org") "* %?"))
+         (org-capture-templates (list custom))
+         (org-directory "/tmp/org")
+         (org-agenda-files nil))
+    (orgx-capture-register-file
+     :name "work" :path "work.org" :key "w" :agenda t
+     :templates '((tasks :headline nil) (journal :headline "Log")
+                  (notes :headline "Ideas") (inbox :headline "Incoming")))
+    (should (member custom org-capture-templates))
+    (should (equal org-agenda-files '("/tmp/org/work.org")))
+    (should (equal (nth 3 (assoc "wtt" org-capture-templates))
+                   '(file "/tmp/org/work.org")))
+    (should (equal (nth 3 (assoc "wjj" org-capture-templates))
+                   '(file+olp+datetree "/tmp/org/work.org" "Log")))
+    (should (equal (nth 3 (assoc "wnn" org-capture-templates))
+                   '(file+headline "/tmp/org/work.org" "Ideas")))
+    (should (equal (nth 3 (assoc "wii" org-capture-templates))
+                   '(file+headline "/tmp/org/work.org" "Incoming")))))
+
+(ert-deftest orgx-capture-register-file-update-test ()
+  "Re-registering replaces keys rather than leaving stale targets."
+  (let ((org-capture-templates nil)
+        (org-directory "/tmp/org"))
+    (orgx-capture-register-file :name "Old" :path "a.org" :key "p" :templates '(tasks))
+    (should-not (assoc "pnn" org-capture-templates))
+    (orgx-capture-register-file
+     :name "New" :path "b.org" :key "p" :templates '((tasks :headline nil)))
+    (should (= 1 (length (seq-filter
+                         (lambda (it) (equal (car it) "ptt"))
+                         org-capture-templates))))
+    (should (equal (nth 3 (assoc "ptt" org-capture-templates))
+                   '(file "/tmp/org/b.org")))
+    (should (equal (assoc "p" org-capture-templates)
+                   '("p" "New (project; b.org)")))
+    (seq-do (lambda (key)
+              (should (= 1 (length (seq-filter
+                                    (lambda (it) (equal (car it) key))
+                                    org-capture-templates)))))
+            '("p" "pt"))))
+
+(ert-deftest orgx-capture-register-file-validation-test ()
+  "Reject invalid stock template specifications before registration."
+  (let ((org-capture-templates nil))
+    (should-error (orgx-capture-register-file :path "a.org"
+                                             :templates '(unknown))
+                  :type 'user-error)
+    (should-error (orgx-capture-register-file :path "a.org"
+                                             :templates '((tasks :headline 3)))
+                  :type 'user-error)
+    (should-not org-capture-templates)))
+
+(ert-deftest orgx-capture-register-file-top-level-test ()
+  "Real captures stay at level one even when the file has nested entries."
+  (let* ((temp-file (make-temp-file "orgx-top-level-" nil ".org"))
+         (org-capture-templates nil))
+    (unwind-protect
+        (progn
+          (with-temp-file temp-file (insert "* Existing\n** Child\n"))
+          (orgx-capture-register-file
+           :path temp-file :key "a" :templates '((tasks :headline nil)))
+          (setf (nth 4 (assoc "att" org-capture-templates)) "* TODO %i")
+          (org-capture-string "New task" "att")
+          (org-capture-finalize)
+          (with-temp-buffer
+            (insert-file-contents temp-file)
+            (org-mode)
+            (goto-char (point-min))
+            (should (= 1 (org-outline-level)))
+            (should (equal "New task" (org-get-heading t t t t)))))
+      (when-let* ((buffer (find-buffer-visiting temp-file)))
+        (kill-buffer buffer))
+      (delete-file temp-file))))
+
+(ert-deftest orgx-capture-register-file-root-families-test ()
+  "Notes, inbox, and datetrees accept empty and nil parent headings."
+  (let ((org-capture-templates nil)
+        (org-agenda-files nil)
+        (org-directory "/tmp/org"))
+    (orgx-capture-register-file
+     :path "root.org" :key "r"
+     :templates '((notes :headline "") (inbox :headline nil)
+                  (datetree :headline nil)))
+    (should-not org-agenda-files)
+    (should (equal (nth 3 (assoc "rnn" org-capture-templates))
+                   '(file "/tmp/org/root.org")))
+    (should (equal (nth 3 (assoc "rii" org-capture-templates))
+                   '(file "/tmp/org/root.org")))
+    (should (equal (nth 3 (assoc "rjj" org-capture-templates))
+                   '(file+olp+datetree "/tmp/org/root.org")))))
+
+(ert-deftest orgx-capture-register-file-invalid-key-test ()
+  "Invalid family prefixes must not partially register templates or agenda."
+  (let ((org-capture-templates nil)
+        (org-agenda-files nil))
+    (should-error
+     (orgx-capture-register-file :path "a.org" :key "t" :agenda t
+                                 :templates '(notes tasks))
+     :type 'user-error)
+    (should-not org-capture-templates)
+    (should-not org-agenda-files)))
 
 (provide 'orgx-capture-test)
 ;;; orgx-capture-test.el ends here

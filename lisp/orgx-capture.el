@@ -16,6 +16,7 @@
 
 (require 'cl-lib)
 (require 'seq)
+(require 'map)
 (require 'subr-x)
 (require 'annotated-completing-read)
 
@@ -236,50 +237,59 @@ ends with TIME-PROMPT-SUFFIX, the template is marked :time-prompt t."
   (let (specs append-item)
     (unless (string-equal "" key)
       (setq append-item t)
-      (add-to-list 'org-capture-templates
-                   (list (concat key char)
-                         (format "%s %s <%s>" name kind (file-name-nondirectory path))))
+      (setf (alist-get (concat key char) org-capture-templates nil nil #'equal)
+            (list (format "%s %s <%s>" name kind (file-name-nondirectory path))))
       (push (list (concat char key) (car first-sub) (cdr first-sub)) specs)
-      (dolist (sub default-subs)
-        (let ((suffix (car sub)))
-          (when (and (string-prefix-p char suffix)
-                     (or (string-suffix-p "q" suffix)
-                         (string-suffix-p "b" suffix)
-                         (string-suffix-p "h" suffix)))
-            (let ((shortcut-key (concat (substring suffix 0 (length char)) key (substring suffix (length char)))))
-              (push (cons shortcut-key (cdr sub)) specs))))))
-    (dolist (entry (append (nreverse specs)
-                           (seq-map (lambda (it) (cons (concat key (car it)) (cdr it)))
-                                    default-subs)))
-      (let* ((key-sequence (nth 0 entry))
-             (template-anchor (nth 1 entry))
-             (description (nth 2 entry))
-             (extra-props (nthcdr 3 entry))
-             (heading-anchor-p (plist-get extra-props :heading-anchor))
-             (template (append (list key-sequence
-                                     (format "%s (%s; %s)" kind name description)
-                                     'entry target
-                                     (funcall body-fn template-anchor heading-anchor-p)
-                                     :prepend prepend
-                                     :kill-buffer t
-                                     :empty-lines 0)
-                               extra-props)))
-        (when (and time-prompt-suffix
-                   (string-suffix-p time-prompt-suffix key-sequence))
-          (setq template (append template (list :time-prompt t))))
-        (add-to-list 'org-capture-templates template append-item)))))
+      (seq-do
+       (lambda (sub)
+         (let ((suffix (car sub)))
+           (when (and (string-prefix-p char suffix)
+                      (or (string-suffix-p "q" suffix)
+                          (string-suffix-p "b" suffix)
+                          (string-suffix-p "h" suffix)))
+             (let ((shortcut-key (concat (substring suffix 0 (length char)) key (substring suffix (length char)))))
+               (push (cons shortcut-key (cdr sub)) specs)))))
+       default-subs))
+    (seq-do
+     (lambda (entry)
+       (let* ((key-sequence (nth 0 entry))
+              (template-anchor (nth 1 entry))
+              (description (nth 2 entry))
+              (extra-props (nthcdr 3 entry))
+              (heading-anchor-p (plist-get extra-props :heading-anchor))
+              (template (append (list key-sequence
+                                      (format "%s (%s; %s)" kind name description)
+                                      'entry target
+                                      (funcall body-fn template-anchor heading-anchor-p)
+                                      :prepend prepend
+                                      :kill-buffer t
+                                      :empty-lines 0)
+                                extra-props)))
+         (when (and time-prompt-suffix
+                    (string-suffix-p time-prompt-suffix key-sequence))
+           (setq template (append template (list :time-prompt t))))
+         (setq org-capture-templates
+               (seq-remove (lambda (it) (equal (car it) key-sequence))
+                           org-capture-templates))
+         (add-to-list 'org-capture-templates template append-item)))
+     (append (nreverse specs)
+             (seq-map (lambda (it) (cons (concat key (car it)) (cdr it)))
+                      default-subs)))))
 
 ;;; Public template builder entrypoints
 
 ;;;###autoload
-(cl-defun orgx-capture-add-journal-templates (&key name path (key ""))
+(cl-defun orgx-capture-add-journal-templates
+    (&key name path (key "")
+          (headline (unless (equal key "") "Journal")))
   "Register a full set of journal capture templates for NAME at PATH.
-KEY is the project key prefix."
+KEY is the project key prefix.
+HEADLINE is the parent heading; nil or empty uses a root datetree."
   (orgx-capture--add-flat-templates
    :kind "journal" :char "j" :name name :path path :key key
-   :target (if (string-equal "" key)
-               (list 'file+olp+datetree path)
-             (list 'file+olp+datetree path "Journal"))
+   :target (if (and headline (not (string-empty-p headline)))
+               (list 'file+olp+datetree path headline)
+             (list 'file+olp+datetree path))
    :body-fn (lambda (anchor &optional heading-p)
               (cond
                (heading-p
@@ -311,30 +321,35 @@ Otherwise, templates target the headline named HEADLINE in PATH."
     (orgx-capture--add-flat-templates
      :kind "tasks" :char "t" :name name :path path :key key
      :target target
-   :body-fn (lambda (anchor &optional heading-p)
-              (cond
-               (heading-p
-                (concat "* TODO " anchor "%?"))
-               ((string-empty-p anchor)
-                "* TODO %(orgx-capture--read-title)%?")
-               (t
-                (concat "* TODO %(orgx-capture--read-title)\n" anchor "%?"))))
-   :first-sub (cons "%i" "selection")
-   :default-subs '(("tt" "%i" "selection")
-                   ("tq" "" "quick task" :immediate-finish t)
-                   ("tx" "%x" "X11 buffer")
-                   ("tlb" "%(orgx-capture--get-link)" "org-link (body)")
-                   ("tlh" "%(orgx-capture--get-link)" "org-link (heading)" :heading-anchor t)
-                   ("tlq" "%(orgx-capture--prompt-link)" "quick org-link task" :heading-anchor t :immediate-finish t)
-                   ("tk" "%c" "emacs kill-ring")))))
+     :body-fn (lambda (anchor &optional heading-p)
+                (cond
+                 (heading-p
+                  (concat "* TODO " anchor "%?"))
+                 ((string-empty-p anchor)
+                  "* TODO %(orgx-capture--read-title)%?")
+                 (t
+                  (concat "* TODO %(orgx-capture--read-title)\n" anchor "%?"))))
+     :first-sub (cons "%i" "selection")
+     :default-subs '(("tt" "%i" "selection")
+                     ("tq" "" "quick task" :immediate-finish t)
+                     ("tx" "%x" "X11 buffer")
+                     ("tlb" "%(orgx-capture--get-link)" "org-link (body)")
+                     ("tlh" "%(orgx-capture--get-link)" "org-link (heading)" :heading-anchor t)
+                     ("tlq" "%(orgx-capture--prompt-link)" "quick org-link task" :heading-anchor t :immediate-finish t)
+                     ("tk" "%c" "emacs kill-ring")))))
 
 ;;;###autoload
-(cl-defun orgx-capture-add-note-templates (&key name path (key ""))
+(cl-defun orgx-capture-add-note-templates
+    (&key name path (key "") (headline "Inbox") (kind "notes") (char "n"))
   "Register a full set of note capture templates for NAME at PATH.
-KEY is the project key prefix."
+KEY is the project key prefix.
+HEADLINE is the parent heading; nil or empty captures at file level.
+KIND and CHAR select the family label and key prefix (also used for inbox)."
   (orgx-capture--add-flat-templates
-   :kind "notes" :char "n" :name name :path path :key key
-   :target (list 'file+headline path "Inbox")
+   :kind kind :char char :name name :path path :key key
+   :target (if (and headline (not (string-empty-p headline)))
+               (list 'file+headline path headline)
+             (list 'file path))
    :body-fn (lambda (anchor &optional heading-p)
               (cond
                (heading-p
@@ -344,14 +359,77 @@ KEY is the project key prefix."
                (t
                 (concat "* %(orgx-capture--read-title)\n" anchor "%?"))))
    :first-sub (cons "%i" "selection")
-   :default-subs '(("nn" "%i" "selection")
-                   ("nx" "%x" "X11 buffer")
-                   ("nlb" "%(orgx-capture--get-link)" "org-link (body)")
-                   ("nlh" "%(orgx-capture--get-link)" "org-link (heading)" :heading-anchor t)
-                   ("nlq" "%(orgx-capture--prompt-link)" "quick org-link (heading)" :heading-anchor t :immediate-finish t)
-                   ("nk" "%c" "emacs kill-ring"))))
+   :default-subs
+   (seq-map (lambda (entry)
+              (cons (if (equal (car entry) "nn")
+                        (concat char char)
+                      (concat char (substring (car entry) 1)))
+                    (cdr entry)))
+            '(("nn" "%i" "selection")
+              ("nx" "%x" "X11 buffer")
+              ("nlb" "%(orgx-capture--get-link)" "org-link (body)")
+              ("nlh" "%(orgx-capture--get-link)" "org-link (heading)" :heading-anchor t)
+              ("nlq" "%(orgx-capture--prompt-link)" "quick org-link (heading)" :heading-anchor t :immediate-finish t)
+              ("nk" "%c" "emacs kill-ring")))))
 
 ;;; Registration helpers
+
+;;;###autoload
+(cl-defun orgx-capture-register-file
+    (&key path name (key "") agenda (templates '(notes journal tasks)))
+  "Register PATH with selected stock capture TEMPLATES.
+Relative paths resolve against `org-directory'.  NAME labels the file;
+KEY prefixes template keys.  AGENDA adds the file to variable `org-agenda-files'.
+TEMPLATES is a list of notes, inbox, tasks, journal, or datetree symbols,
+or lists such as (tasks :headline nil) and (journal :headline \"Log\").
+Nil or empty headlines capture at file level (a root datetree for journal).
+Defaults are Inbox for notes/inbox, Tasks for tasks, and Journal for a
+journal with a nonempty KEY.  Inbox uses the i key family; datetree is an
+alias for journal.  Existing conventional `org-capture-templates' remain
+available; register them directly as usual.  Reusing a generated key
+replaces that entry, making repeated registrations safe."
+  (unless (and (stringp path) (not (string-empty-p path))
+               (stringp key) (or (null name) (stringp name)))
+    (user-error "Capture registration needs a path and string name/key"))
+  (seq-do
+   (lambda (spec)
+     (let ((kind (if (consp spec) (car spec) spec))
+           (options (when (consp spec) (cdr spec))))
+       (unless (and (memq kind '(notes inbox tasks journal datetree))
+                    (or (null options)
+                        (and (= (length options) 2)
+                             (eq (car options) :headline)
+                             (or (null (cadr options))
+                                 (stringp (cadr options))))))
+         (user-error "Invalid stock capture template: %S" spec))
+       (when (equal key (pcase kind
+                          ('tasks "t")
+                          ((or 'journal 'datetree) "j")
+                          ('notes "n")
+                          ('inbox "i")))
+         (user-error "Capture key conflicts with family: %S" kind))))
+   templates)
+  (require 'org-capture)
+  (setq path (expand-file-name path org-directory))
+  (setq name (or name (file-name-base path)))
+  (when agenda
+    (add-to-list 'org-agenda-files path))
+  (unless (string-empty-p key)
+    (setf (alist-get key org-capture-templates nil nil #'equal)
+          (list (format "%s (project; %s)" name (file-name-nondirectory path)))))
+  (seq-do
+   (lambda (spec)
+     (let* ((kind (if (consp spec) (car spec) spec))
+            (options (when (consp spec) (cdr spec)))
+            (args (append (list :name name :path path :key key) options)))
+       (pcase kind
+         ('tasks (apply #'orgx-capture-add-task-templates args))
+         ((or 'journal 'datetree)
+          (apply #'orgx-capture-add-journal-templates args))
+         ('notes (apply #'orgx-capture-add-note-templates args))
+         ('inbox (apply #'orgx-capture-add-note-templates
+                        :kind "inbox" :char "i" args)))))
+   templates))
 
 ;;;###autoload
 (defmacro orgx-capture-add-project-file-templates (&rest args)
@@ -364,60 +442,15 @@ into `org-load-hook'."
      (add-hook 'org-load-hook
                (lambda () (orgx-capture--add-project-file-templates ,@args)))))
 
-(cl-defun orgx-capture--add-project-file-templates (&key name (path nil) (key "") (agenda nil))
-  "Define a set of capture templates for adding notes and tasks to PATH.
-NAME is the project name, KEY the key prefix, and AGENDA, when non-nil,
-adds PATH to variable `org-agenda-files'."
-  (unless (and (boundp 'org-capture-templates) org-capture-templates)
-    (orgx-capture-reset-templates))
-
-  (when (and agenda (boundp 'org-agenda-files) (not (member (expand-file-name path) (org-agenda-files))))
-    (add-to-list 'org-agenda-files (expand-file-name path)))
-  (when (not (equal "" key))
-    (when (string-search "jnt" key)
-      (error "org-capture prefix key '%s' for '%s' contains well-known prefix" key path))
-    (when (string-search "xlkq" key)
-      (error "org-capture prefix key '%s' for '%s' contains sub-template key" key path)))
-
-  (unless name
-    (setq name "planner"))
-
-  (setq path (if path
-                 (expand-file-name path)
-               (concat (subst-char-in-string ?\s ?- (downcase name)) ".org")))
-
-  (add-to-list 'org-capture-templates
-               (list key (format "%s (project; %s)" name (file-name-nondirectory path)))
-               t)
-
-  (when (and (boundp 'org-directory)
-             org-directory
-             (let ((file-dir (file-name-directory path)))
-               (and file-dir
-                    (not (string-equal (expand-file-name file-dir)
-                                       (expand-file-name org-directory))))))
-    (when (boundp 'org-agenda-files)
-      (add-to-list 'org-agenda-files path)))
-
-  (let ((org-filename (if (file-exists-p path)
-                          path
-                        (if (boundp 'org-directory)
-                            (file-name-concat org-directory path)
-                          path))))
-    (orgx-capture-add-note-templates
-     :name name
-     :key key
-     :path org-filename)
-
-    (orgx-capture-add-journal-templates
-     :name name
-     :key key
-     :path org-filename)
-
-    (orgx-capture-add-task-templates
-     :name name
-     :key key
-     :path org-filename)))
+(cl-defun orgx-capture--add-project-file-templates
+    (&key (name "planner") path (key "") agenda
+          (templates '(notes journal tasks)))
+  "Register project PATH, NAME, KEY, AGENDA and selected TEMPLATES.
+Compatibility entry point for `orgx-capture-add-project-file-templates'.
+See `orgx-capture-register-file' for stock template specifications."
+  (orgx-capture-register-file
+   :name name :path (or path (concat (subst-char-in-string ?\s ?- (downcase name)) ".org"))
+   :key key :agenda agenda :templates templates))
 
 ;;;###autoload
 (defun orgx-capture-setup-standard-templates ()
