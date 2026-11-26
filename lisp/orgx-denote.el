@@ -752,8 +752,6 @@ in an `org-capture' buffer under the target."
 ;;;###autoload
 (defalias 'orgx-denote-refile #'orgx-refile-denote)
 
-(defalias 'org-refile-to-denote #'orgx-refile-denote)
-(defalias 'denote-org-refile-to-denote #'orgx-refile-denote)
 (defalias 'orgx-refile-to-denote #'orgx-refile-denote)
 
 (provide 'orgx-denote)

@@ -12,8 +12,8 @@
 ;; or the note's top level.
 ;;
 ;; Also provides the interactive command `orgx-refile-denote' (with aliases
-;; `orgx-denote-refile', `org-refile-to-denote', and `denote-org-refile-to-denote')
-;; to refile directly to a Denote note from Org buffers and agenda.
+;; `orgx-denote-refile' and `orgx-refile-to-denote') to refile directly to a
+;; Denote note from Org buffers and agenda.
 ;;
 ;; Enable with `orgx-refile-denote-enable' (done by `orgx-setup' and `orgx-global-mode').
 
@@ -133,7 +133,8 @@ NAME may carry suffixes added by `org-refile-get-location'."
           (nreverse headings))))))
 
 (defun orgx-refile-denote--read-heading (file)
-  "Prompt for a heading in FILE, returning its buffer position, or nil for top level."
+  "Prompt for a heading in FILE.
+Return its buffer position, or nil for top level."
   (if (not orgx-refile-denote-prompt-heading)
       nil
     (if-let* ((headings (orgx-refile-denote--headings-alist file)))
@@ -169,7 +170,8 @@ NAME may carry suffixes added by `org-refile-get-location'."
 
 (defun orgx-refile-denote--ad-get-location (location)
   "Filter-return advice for `org-refile-get-location'.
-When LOCATION is a Denote target, resolve note/heading and return a concrete refile location."
+When LOCATION is a Denote target, resolve note/heading and return a
+concrete refile location."
   (if-let* (orgx-refile-denote--active
             ((equal (nth 1 location) orgx-refile-denote--file))
             (entry (orgx-refile-denote--lookup (car location))))
@@ -239,12 +241,6 @@ copy the subtree instead of moving it."
 
 ;;;###autoload
 (defalias 'orgx-denote-refile #'orgx-refile-denote)
-
-;;;###autoload
-(defalias 'org-refile-to-denote #'orgx-refile-denote)
-
-;;;###autoload
-(defalias 'denote-org-refile-to-denote #'orgx-refile-denote)
 
 ;;;###autoload
 (defalias 'orgx-refile-to-denote #'orgx-refile-denote)

@@ -15,7 +15,7 @@ Choosing a note prompts for an optional heading inside that note (defaulting to 
 
 * Standalone Command
 
-You can also refile directly to Denote using ~orgx-refile-denote~ (or its aliases ~orgx-denote-refile~, ~org-refile-to-denote~, ~denote-org-refile-to-denote~).
+You can also refile directly to Denote using ~orgx-refile-denote~ (or its aliases ~orgx-denote-refile~, ~orgx-refile-to-denote~).
 Works both in Org buffers and in the Org agenda. With a numeric prefix argument of 3, copies the subtree instead of moving it.
 
 * Configuration

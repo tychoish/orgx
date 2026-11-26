@@ -379,7 +379,8 @@ KIND and CHAR select the family label and key prefix (also used for inbox)."
     (&key path name (key "") agenda (templates '(notes journal tasks)))
   "Register PATH with selected stock capture TEMPLATES.
 Relative paths resolve against `org-directory'.  NAME labels the file;
-KEY prefixes template keys.  AGENDA adds the file to variable `org-agenda-files'.
+KEY prefixes template keys.  AGENDA adds the file to
+variable `org-agenda-files'.
 TEMPLATES is a list of notes, inbox, tasks, journal, or datetree symbols,
 or lists such as (tasks :headline nil) and (journal :headline \"Log\").
 Nil or empty headlines capture at file level (a root datetree for journal).
