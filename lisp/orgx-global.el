@@ -206,7 +206,9 @@ is provided."
     (orgx-global--ensure-setup)
     (orgx--setup-capture-once))
   (advice-remove 'org-capture #'orgx-global--before-capture)
-  (advice-remove 'orgx-capture #'orgx-global--before-capture))
+  (advice-remove 'orgx-capture #'orgx-global--before-capture)
+  (advice-remove 'orgx-capture-shell #'orgx-global--before-capture)
+  (advice-remove 'orgx-capture-shell-toggle #'orgx-global--before-capture))
 
 (defun orgx-global--before-agenda (&rest _)
   "Prepare the first agenda when it triggers Orgx initialization."
@@ -226,6 +228,8 @@ is provided."
         (advice-add 'org-agenda :before #'orgx-global--before-agenda)
         (advice-add 'org-capture :before #'orgx-global--before-capture)
         (advice-add 'orgx-capture :before #'orgx-global--before-capture)
+        (advice-add 'orgx-capture-shell :before #'orgx-global--before-capture)
+        (advice-add 'orgx-capture-shell-toggle :before #'orgx-global--before-capture)
         (when (and (featurep 'org)
                    (or (featurep 'orgx) (not load-in-progress)))
           (orgx-global--ensure-setup))
@@ -245,6 +249,8 @@ is provided."
     (advice-remove 'org-agenda #'orgx-global--before-agenda)
     (advice-remove 'org-capture #'orgx-global--before-capture)
     (advice-remove 'orgx-capture #'orgx-global--before-capture)
+    (advice-remove 'orgx-capture-shell #'orgx-global--before-capture)
+    (advice-remove 'orgx-capture-shell-toggle #'orgx-global--before-capture)
     (when (featurep 'orgx)
       (orgx--disable-advice)
       (orgx-global--revert-settings)

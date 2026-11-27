@@ -33,11 +33,11 @@ When logging an entry, the target file and headline are resolved via ~orgx-captu
         ("~/src/project-b" . "inbox.org")
         ("^/tmp/.*" . ("scratch.org" . "Scratch"))))
 #+end_src
-If no directory pattern matches, it falls back to ~orgx-capture-shell-default-file~ (=agentic.org=) and ~orgx-capture-shell-default-headline~ (=Tasks=).
+If no directory pattern matches, it falls back to ~orgx-capture-shell-default-file~ (=agentic.org=). When a target file has matching entries in =org-capture-templates=, the shell respects their configured target headline (including top-level =(file ...)= targets with no headline, outline paths, and =file+olp+datetree= targets) and template format, falling back to ~orgx-capture-shell-default-headline~ (=Tasks=) only when no capture template targets that file.
 
 ** 3. Slash Commands
 Within the REPL buffer, slash commands allow dynamic reconfiguration:
-- =/target [file[:headline]]= :: Switch target file and headline on the fly.
+- =/target [file[:headline]]= :: Switch target file and headline on the fly (when =:headline= is omitted, resolves from =org-capture-templates= for =file= when present).
 - =/template [name|key]= :: Switch active template formatting. Accepts builtin types (=task=, =note=, =journal=, =plain=) or any key from =org-capture-templates= (e.g. =tq=, =tt=, =atq=, =jj=). When a capture template with a concrete file target is activated, automatically aligns the active target file and headline (customizable via ~orgx-capture-shell-sync-target-on-template~).
 - =/denote= :: Interactively pick a Denote note as the capture target.
 - =/undo= :: Roll back the most recently captured item.

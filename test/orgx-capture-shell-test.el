@@ -840,7 +840,7 @@
 (defun orgx-capture-shell-test--tpl (kind path prepend &optional headline)
   "Return a flat capture template of KIND (a description word) for PATH."
   (list "xx" (format "%s (proj; q)" kind) 'entry (list (quote file+headline) path (or headline "Tasks"))
-        "* %?" :prepend prepend))
+        (if (string-equal kind "tasks") "* TODO %?" "* %?") :prepend prepend))
 
 (ert-deftest orgx-capture-shell-resolve-prepend-builtin-defaults-test ()
   (let ((orgx-capture-shell-prepend 'follow) (org-capture-templates nil))
@@ -1330,6 +1330,179 @@
         (should (member "xt" (cdr candidates)))
         (should (member "task" (cdr candidates)))
         (should (member "journal" (cdr candidates)))))))
+
+(ert-deftest orgx-capture-shell-resolve-target-respects-templates-test ()
+  "Target resolution respects `org-capture-templates' for the target file."
+  (let* ((dir (make-temp-file "orgx-dir-" t))
+         (agentic (expand-file-name "agentic.org" dir))
+         (planner (expand-file-name "planner.org" dir))
+         (proj (expand-file-name "proj.org" dir))
+         (org-directory dir)
+         (orgx-capture-shell-default-file "agentic.org")
+         (orgx-capture-shell-default-headline "Tasks")
+         (orgx-capture-shell-target-directory-alist
+          `((,(expand-file-name "explicit" dir) . (,proj . "Custom"))
+            (,(expand-file-name "bare" dir) . ,proj)))
+         (org-capture-templates
+          `(("atq" "tasks (agentic; quick task)" entry
+             (file "agentic.org")
+             "* TODO %(orgx-capture--read-title)%?" :prepend t)
+            ("tq" "tasks (prime; quick task)" entry
+             (file+headline "planner.org" "Tasks")
+             "* TODO %(orgx-capture--read-title)%?" :prepend t)
+            ("pt" "tasks (proj; quick task)" entry
+             (file+headline ,proj "Backlog")
+             "* TODO %?" :prepend t))))
+    (unwind-protect
+        (progn
+          ;; Whole-file template clears default headline to nil
+          (should (equal (orgx-capture-shell--resolve-target "/other/path")
+                         (cons agentic nil)))
+          ;; Directory alist bare file uses template headline
+          (should (equal (orgx-capture-shell--resolve-target
+                          (expand-file-name "bare/sub" dir))
+                         (cons proj "Backlog")))
+          ;; Explicit cons in directory alist keeps its headline
+          (should (equal (orgx-capture-shell--resolve-target
+                          (expand-file-name "explicit/sub" dir))
+                         (cons proj "Custom")))
+          ;; File with file+headline template resolves that headline
+          (let ((orgx-capture-shell-default-file "planner.org"))
+            (should (equal (orgx-capture-shell--resolve-target "/other/path")
+                           (cons planner "Tasks")))))
+      (delete-directory dir t))))
+
+(ert-deftest orgx-capture-shell-capture-respects-file-template-test ()
+  "Capturing to a file with a specific template matches classic capture."
+  (let* ((dir (make-temp-file "orgx-cap-" t))
+         (agentic (expand-file-name "agentic.org" dir))
+         (org-directory dir)
+         (orgx-capture-shell-default-file "agentic.org")
+         (orgx-capture-shell-default-headline "Tasks")
+         (orgx-capture-shell-prepend 'follow)
+         (orgx-capture-shell-undo-ring nil)
+         (org-capture-templates
+          '(("atlh" "tasks (agentic; org-link (heading))" entry
+             (file "agentic.org")
+             "* TODO %(orgx-capture--get-link)%?" :prepend t)
+            ("atq" "tasks (agentic; quick task)" entry
+             (file "agentic.org")
+             "* TODO %(orgx-capture--read-title) :agent:%?" :prepend t))))
+    (unwind-protect
+        (progn
+          (with-temp-file agentic
+            (insert "* Tasks\n** existing\n* Old task\n"))
+          (with-temp-buffer
+            (let ((default-directory "/tmp/"))
+              (orgx-capture-shell-mode))
+            (should (equal orgx-capture-shell-current-file agentic))
+            (should-not orgx-capture-shell-current-headline)
+            (orgx-capture-shell--capture "Ship fix"))
+          (should (equal (orgx-capture-shell-test--contents agentic)
+                         "* TODO Ship fix :agent:\n* Tasks\n** existing\n* Old task\n")))
+      (when-let* ((b (get-file-buffer agentic)))
+        (with-current-buffer b (set-buffer-modified-p nil))
+        (kill-buffer b))
+      (delete-directory dir t))))
+
+(ert-deftest orgx-capture-shell-target-command-respects-file-template-test ()
+  "/target updates headline from file's template unless explicitly given."
+  (let* ((dir (make-temp-file "orgx-tgt-" t))
+         (agentic (expand-file-name "agentic.org" dir))
+         (planner (expand-file-name "planner.org" dir))
+         (org-directory dir)
+         (org-capture-templates
+          '(("atq" "tasks (agentic; quick task)" entry
+             (file "agentic.org")
+             "* TODO %?" :prepend t)
+            ("tq" "tasks (prime; quick task)" entry
+             (file+headline "planner.org" "Tasks")
+             "* TODO %?" :prepend t))))
+    (unwind-protect
+        (progn
+          (with-temp-file agentic (insert "* Top\n"))
+          (with-temp-file planner (insert "* Tasks\n"))
+          (with-temp-buffer
+            (orgx-capture-shell-mode)
+            (setq orgx-capture-shell-current-file planner)
+            (setq orgx-capture-shell-current-headline "Tasks")
+            ;; Switching to agentic.org without headline clears Tasks
+            (let ((msg (orgx-capture-shell--execute-slash-command
+                        (format "/target %s" agentic))))
+              (should (string-match-p "agentic\\.org \\[none\\]" msg))
+              (should (equal orgx-capture-shell-current-file agentic))
+              (should-not orgx-capture-shell-current-headline))
+            ;; Switching to planner.org picks up Tasks from its template
+            (orgx-capture-shell--execute-slash-command (format "/target %s" planner))
+            (should (equal orgx-capture-shell-current-headline "Tasks"))
+            ;; Explicit headline overrides template target
+            (orgx-capture-shell--execute-slash-command
+             (format "/target %s:Explicit" agentic))
+            (should (equal orgx-capture-shell-current-headline "Explicit"))))
+      (delete-directory dir t))))
+
+(ert-deftest orgx-capture-shell-set-template-clears-headline-for-file-target-test ()
+  "Activating a whole-file template clears any prior headline."
+  (let* ((dir (make-temp-file "orgx-sync-" t))
+         (agentic (expand-file-name "agentic.org" dir))
+         (org-directory dir)
+         (orgx-capture-shell-sync-target-on-template t)
+         (org-capture-templates
+          '(("atq" "tasks (agentic; quick task)" entry
+             (file "agentic.org")
+             "* TODO %?" :prepend t)
+            ("ajj" "journal (agentic; <today>)" entry
+             (file+olp+datetree "agentic.org" "Journal")
+             "* %(orgx-capture--read-title) <%<%Y-%m-%d %H:%M>>%?" :prepend nil))))
+    (unwind-protect
+        (with-temp-buffer
+          (orgx-capture-shell-mode)
+          (setq orgx-capture-shell-current-file "/tmp/other.org")
+          (setq orgx-capture-shell-current-headline "OldHeadline")
+          (orgx-capture-shell-set-template "atq")
+          (should (equal orgx-capture-shell-current-file agentic))
+          (should-not orgx-capture-shell-current-headline)
+          ;; Switching generic template symbol syncs headline for current file
+          (orgx-capture-shell-set-template 'journal)
+          (should (equal orgx-capture-shell-current-headline "Journal"))
+          (orgx-capture-shell-set-template 'task)
+          (should-not orgx-capture-shell-current-headline))
+      (delete-directory dir t))))
+
+(ert-deftest orgx-capture-shell-format-entry-file-template-multiline-test ()
+  "Multiline shell input keeps heading decorations on the title line."
+  (let ((org-capture-templates
+         '(("atq" "tasks (agentic; quick task)" entry
+            (file "/tmp/agentic-ml.org")
+            "* TODO %(orgx-capture--read-title) :agent:%?" :prepend t)
+           ("ajj" "journal (agentic; <today>)" entry
+            (file+olp+datetree "/tmp/agentic-ml.org" "Journal")
+            "* %(orgx-capture--read-title) <%<%Y-%m-%d %H:%M>>%?" :prepend nil))))
+    (should (equal (orgx-capture-shell--format-entry
+                    "Fix bug\nsome body" 'task "/tmp/agentic-ml.org")
+                   "* TODO Fix bug :agent:\nsome body"))
+    (let ((j (orgx-capture-shell--format-entry
+              "Standup\nnotes here" 'journal "/tmp/agentic-ml.org")))
+      (should (string-match-p
+               "\\`\\* Standup <[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\} [0-9]\\{2\\}:[0-9]\\{2\\}>\nnotes here\\'"
+               j)))))
+
+(ert-deftest orgx-capture-shell-datetree-capture-test ()
+  "Journal captures targeting file+olp+datetree file under a date tree."
+  (orgx-capture-shell-test--with-file "* Journal\n"
+    (let ((orgx-capture-shell-prepend 'follow)
+          (org-capture-templates
+           `(("ajj" "journal (agentic; <today>)" entry
+              (file+olp+datetree ,file "Journal")
+              "* %(orgx-capture--read-title) <%<%Y-%m-%d %H:%M>>%?" :prepend nil))))
+      (orgx-capture-shell--capture "Daily entry" :template 'journal
+                                   :file file :headline "Journal")
+      (let ((contents (orgx-capture-shell-test--contents file))
+            (year (format-time-string "%Y"))
+            (day (format-time-string "%Y-%m-%d")))
+        (should (string-match-p (format "\\*\\* %s" year) contents))
+        (should (string-match-p (format "\\*\\*\\*\\* %s" day) contents))
+        (should (string-match-p "\\*\\*\\*\\*\\* Daily entry <" contents))))))
 
 (provide 'orgx-capture-shell-test)
 ;;; orgx-capture-shell-test.el ends here

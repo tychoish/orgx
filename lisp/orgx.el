@@ -1104,6 +1104,8 @@ Activates `orgx-command-map' under \\`C-c o'."
   (orgx-capture-setup-standard-templates)
   (advice-remove 'org-capture #'orgx--setup-capture-once)
   (advice-remove 'orgx-capture #'orgx--setup-capture-once)
+  (advice-remove 'orgx-capture-shell #'orgx--setup-capture-once)
+  (advice-remove 'orgx-capture-shell-toggle #'orgx--setup-capture-once)
   (remove-hook 'org-capture-mode-hook #'orgx--setup-capture-once))
 
 (defun orgx--setup-agenda-once (&rest _)
@@ -1116,6 +1118,8 @@ Activates `orgx-command-map' under \\`C-c o'."
   "Enable orgx advice and link hooks."
   (advice-add 'org-capture :before #'orgx--setup-capture-once)
   (advice-add 'orgx-capture :before #'orgx--setup-capture-once)
+  (advice-add 'orgx-capture-shell :before #'orgx--setup-capture-once)
+  (advice-add 'orgx-capture-shell-toggle :before #'orgx--setup-capture-once)
   (advice-add 'org-agenda :before #'orgx--setup-agenda-once)
   (add-hook 'org-capture-mode-hook #'orgx--setup-capture-once)
   (add-hook 'org-agenda-mode-hook #'orgx--setup-agenda-once)
@@ -1135,6 +1139,8 @@ Activates `orgx-command-map' under \\`C-c o'."
   "Disable orgx advice and link hooks."
   (advice-remove 'org-capture #'orgx--setup-capture-once)
   (advice-remove 'orgx-capture #'orgx--setup-capture-once)
+  (advice-remove 'orgx-capture-shell #'orgx--setup-capture-once)
+  (advice-remove 'orgx-capture-shell-toggle #'orgx--setup-capture-once)
   (advice-remove 'org-agenda #'orgx--setup-agenda-once)
   (remove-hook 'org-capture-mode-hook #'orgx--setup-capture-once)
   (remove-hook 'org-agenda-mode-hook #'orgx--setup-agenda-once)

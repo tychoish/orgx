@@ -697,6 +697,25 @@ Other tests may leave `orgx-mode-turn-on' on the hook."
                            '(capture-setup capture capture agenda-setup agenda agenda))))
         (orgx-global-mode -1)))))
 
+(ert-deftest orgx-global-mode-prepares-capture-before-shell-test ()
+  "Opening `orgx-capture-shell' triggers first-time capture template setup."
+  (let ((orgx-global-mode nil)
+        (orgx--setup-done nil)
+        (orgx-setup-hook nil)
+        (events nil))
+    (cl-letf (((symbol-function 'orgx-capture-setup-standard-templates)
+               (lambda () (push 'capture-setup events)))
+              ((symbol-function 'orgx-capture-shell)
+               (lambda (&rest _) (push 'shell events))))
+      (unwind-protect
+          (progn
+            (orgx-global-mode 1)
+            (should-not events)
+            (orgx-capture-shell)
+            (orgx-capture-shell)
+            (should (equal (reverse events) '(capture-setup shell shell))))
+        (orgx-global-mode -1)))))
+
 (ert-deftest orgx-capture-prepares-templates-before-selection-test ()
   "The first orgx capture picker includes standard templates."
   (require 'orgx-capture)

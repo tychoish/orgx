@@ -36,6 +36,8 @@
 
 (declare-function denote-directory-files "denote")
 (declare-function denote-retrieve-filename-title "denote")
+(declare-function org-datetree-find-date-create "org-datetree" (d &optional keep-restriction))
+(declare-function calendar-current-date "calendar" (&optional offset))
 (declare-function cape-dabbrev "cape")
 (declare-function cape-dict "cape")
 (declare-function cape-file "cape")
@@ -181,23 +183,32 @@ or `orgx-capture-shell-command-menu'."
   "Resolve the default (FILE . HEADLINE) target for DIR or `default-directory'."
   (let* ((target-dir (file-name-as-directory (expand-file-name (or dir default-directory))))
          (matched nil))
-    (dolist (entry orgx-capture-shell-target-directory-alist)
-      (when (and (not matched)
-                 (let ((pat (car entry)))
-                   (if (string-prefix-p "^" pat)
-                       (string-match-p pat target-dir)
-                     (string-prefix-p (expand-file-name pat) target-dir))))
-        (setq matched (cdr entry))))
+    (seq-do
+     (lambda (entry)
+       (when (and (not matched)
+                  (let ((pat (car entry)))
+                    (if (string-prefix-p "^" pat)
+                        (string-match-p pat target-dir)
+                      (string-prefix-p (expand-file-name pat) target-dir))))
+         (setq matched (cdr entry))))
+     orgx-capture-shell-target-directory-alist)
     (cond
      ((consp matched)
       (cons (expand-file-name (car matched)) (cdr matched)))
      ((stringp matched)
-      (cons (expand-file-name matched) orgx-capture-shell-default-headline))
+      (let* ((file (expand-file-name matched))
+             (tpl (orgx-capture-shell--find-template-for-file file)))
+        (cons file (if tpl
+                       (orgx-capture-shell--target-headline (nth 3 tpl))
+                     orgx-capture-shell-default-headline))))
      (t
-      (let ((base-file (if (boundp 'org-directory)
-                           (expand-file-name orgx-capture-shell-default-file org-directory)
-                         (expand-file-name orgx-capture-shell-default-file))))
-        (cons base-file orgx-capture-shell-default-headline))))))
+      (let* ((base-file (if (boundp 'org-directory)
+                            (expand-file-name orgx-capture-shell-default-file org-directory)
+                          (expand-file-name orgx-capture-shell-default-file)))
+             (tpl (orgx-capture-shell--find-template-for-file base-file)))
+        (cons base-file (if tpl
+                            (orgx-capture-shell--target-headline (nth 3 tpl))
+                          orgx-capture-shell-default-headline)))))))
 
 (defun orgx-capture-shell--set-target (file &optional headline keep-headline)
   "Set target FILE and optional HEADLINE, updating `default-directory'.
@@ -335,7 +346,12 @@ Each element is of the form: (LABEL VALUE ANNOTATION GROUP)."
 (defun orgx-capture-shell--interpolate-template (template-str text)
   "Interpolate TEXT into Org capture TEMPLATE-STR non-modally."
   (let* ((res template-str)
-         (title (string-trim text))
+         (trimmed (string-trim text))
+         (parts (split-string trimmed "\n"))
+         (title (car parts))
+         (body (when (cdr parts)
+                 (string-trim-right (string-join (cdr parts) "\n"))))
+         (has-i (string-match-p "%i" res))
          (title-inserted nil))
     ;; 1. Expand title prompts if present
     (when (string-match-p "%(orgx-capture--read-title)" res)
@@ -371,18 +387,26 @@ Each element is of the form: (LABEL VALUE ANNOTATION GROUP)."
       (setq res (replace-regexp-in-string "%(orgx-capture--prompt-link)" (lambda (_) link) res t t))
       (setq res (replace-regexp-in-string "%a" (lambda (_) link) res t t)))
     ;; 6. Expand clipboard / region / kill-ring placeholders
-    (setq res (replace-regexp-in-string "%i" "" res t t))
+    (setq res (replace-regexp-in-string "%i" (lambda (_) (or body "")) res t t))
     (setq res (replace-regexp-in-string "%x" "" res t t))
     (setq res (replace-regexp-in-string "%c" (lambda (_) (or (and (fboundp 'current-kill) (ignore-errors (current-kill 0 t))) "")) res t t))
-    ;; 7. Clean up
-    (string-trim-right res)))
+    ;; 7. Clean up and append body when template lacked %i
+    (setq res (string-trim-right res))
+    (if (and body (not has-i) (not (string-empty-p body)))
+        (concat res "\n" body)
+      res)))
 
-(defun orgx-capture-shell--format-entry (text template)
-  "Format capture TEXT according to TEMPLATE (symbol or key string)."
+(defun orgx-capture-shell--format-entry (text template &optional file)
+  "Format capture TEXT according to TEMPLATE (symbol or key string).
+When FILE is provided and TEMPLATE is not an explicit key, uses the
+matching `org-capture-templates' entry targeting FILE when available."
   (let ((trimmed (string-trim text)))
     (if (string-match-p orgx-capture-shell--heading-line-regexp trimmed)
         trimmed
-      (if-let* ((entry (orgx-capture-shell--find-template template)))
+      (if-let* ((entry (or (orgx-capture-shell--find-template template)
+                           (and file (not (eq template 'plain))
+                                (orgx-capture-shell--find-template-for-file
+                                 file template)))))
           (let ((template-body (nth 4 entry)))
             (cond
              ((stringp template-body)
@@ -437,11 +461,100 @@ Each element is of the form: (LABEL VALUE ANNOTATION GROUP)."
 
 (defun orgx-capture-shell--template-file-p (tpl file)
   "Return non-nil if the capture template TPL targets FILE."
-  (let ((target (nth 3 tpl)))
+  (let ((target (nth 3 tpl))
+        (org-dir (and (boundp 'org-directory) org-directory)))
     (and file (consp target) (stringp (nth 1 target))
-         (string-equal (expand-file-name (nth 1 target)
-                                         (and (boundp 'org-directory) org-directory))
-                       (expand-file-name file)))))
+         (let ((target-path (expand-file-name (nth 1 target) org-dir)))
+           (or (string-equal target-path (expand-file-name file org-dir))
+               (string-equal target-path (expand-file-name file)))))))
+
+(defun orgx-capture-shell--target-headline (target)
+  "Extract the headline path from an `org-capture' TARGET specification.
+Returns nil for whole-file targets such as `(file \"foo.org\")'."
+  (when (consp target)
+    (pcase (car target)
+      ('file nil)
+      ('file+headline (nth 2 target))
+      ('file+olp (string-join (nthcdr 2 target)
+                              orgx-capture-shell-headline-separator))
+      ('file+olp+datetree
+       (when-let* ((olp (nthcdr 2 target)))
+         (string-join olp orgx-capture-shell-headline-separator)))
+      (_ nil))))
+
+(defun orgx-capture-shell--find-template-for-file (file &optional template)
+  "Find an `org-capture-templates' entry targeting FILE for TEMPLATE.
+TEMPLATE defaults to `orgx-capture-shell-current-template' (or `task')."
+  (when (and file (boundp 'org-capture-templates))
+    (let* ((tpl (or template orgx-capture-shell-current-template 'task))
+           (exact (orgx-capture-shell--find-template tpl)))
+      (cond
+       ((and exact (orgx-capture-shell--template-file-p exact file))
+        exact)
+       ((eq tpl 'plain)
+        nil)
+       (t
+        (let* ((kind-sym
+                (cond
+                 ((symbolp tpl) tpl)
+                 ((and (stringp tpl)
+                       (memq (intern-soft tpl) orgx-capture-shell-templates))
+                  (intern-soft tpl))
+                 (exact
+                  (let ((desc (downcase (or (nth 1 exact) ""))))
+                    (cond
+                     ((string-prefix-p "journal" desc) 'journal)
+                     ((string-prefix-p "notes" desc) 'note)
+                     (t 'task))))
+                 (t 'task)))
+               (kind-word (alist-get kind-sym orgx-capture-shell--template-kinds))
+               (file-entries
+                (seq-filter (lambda (c)
+                              (and (consp c) (>= (length c) 5)
+                                   (orgx-capture-shell--template-file-p c file)))
+                            org-capture-templates))
+               (prefixed
+                (and kind-word
+                     (seq-filter (lambda (c)
+                                   (and (stringp (nth 1 c))
+                                        (string-prefix-p kind-word (downcase (nth 1 c)))))
+                                 file-entries)))
+               (candidates
+                (or prefixed
+                    (pcase kind-sym
+                      ('journal
+                       (seq-filter (lambda (c)
+                                     (or (eq (car-safe (nth 3 c)) 'file+olp+datetree)
+                                         (string-match-p "journal" (downcase (or (nth 1 c) "")))))
+                                   file-entries))
+                      ('note
+                       (seq-filter (lambda (c)
+                                     (string-match-p "\\b\\(?:notes?\\|inbox\\)\\b"
+                                                     (downcase (or (nth 1 c) ""))))
+                                   file-entries))
+                      ('task
+                       (seq-filter (lambda (c)
+                                     (let ((desc (downcase (or (nth 1 c) ""))))
+                                       (and (eq (nth 2 c) 'entry)
+                                            (not (eq (car-safe (nth 3 c)) 'file+olp+datetree))
+                                            (not (string-prefix-p "journal" desc))
+                                            (not (string-prefix-p "notes" desc)))))
+                                   file-entries))
+                      (_ nil))))
+               (clean-p
+                (lambda (c)
+                  (and (stringp (nth 4 c))
+                       (not (string-match-p
+                             "%[cxa]\\|orgx-capture--\\(?:get\\|prompt\\)-link"
+                             (nth 4 c)))))))
+          (or (seq-find (lambda (c)
+                          (and (funcall clean-p c)
+                               (let ((desc (downcase (or (nth 1 c) ""))))
+                                 (or (string-search "quick" desc)
+                                     (string-search "<today>" desc)))))
+                        candidates)
+              (seq-find clean-p candidates)
+              (car candidates))))))))
 
 (defun orgx-capture-shell--resolve-prepend (template &optional file)
   "Return non-nil if entries for shell TEMPLATE should be prepended.
@@ -455,20 +568,20 @@ whose target is FILE; absent one, the builtin default for TEMPLATE."
           (if (plist-member plist :prepend)
               (and (plist-get plist :prepend) t)
             t))
-      (let* ((kind (alist-get template orgx-capture-shell--template-kinds))
-             (candidates
-              (and kind (boundp 'org-capture-templates)
-                   (seq-filter (lambda (tpl)
-                                 (and (consp tpl) (>= (length tpl) 5)
-                                      (stringp (nth 1 tpl))
-                                      (string-prefix-p kind (nth 1 tpl))))
-                               org-capture-templates)))
-             (tpl (or (seq-find (lambda (c) (orgx-capture-shell--template-file-p c file))
-                                candidates)
-                      (car candidates))))
-        (if tpl
-            (and (plist-get (nthcdr 5 tpl) :prepend) t)
-          (alist-get template orgx-capture-shell--builtin-prepend t))))))
+      (if-let* ((file-tpl (and file
+                               (orgx-capture-shell--find-template-for-file
+                                file template))))
+          (and (plist-get (nthcdr 5 file-tpl) :prepend) t)
+        (let* ((kind (alist-get template orgx-capture-shell--template-kinds))
+               (tpl (and kind (boundp 'org-capture-templates)
+                         (seq-find (lambda (c)
+                                     (and (consp c) (>= (length c) 5)
+                                          (stringp (nth 1 c))
+                                          (string-prefix-p kind (nth 1 c))))
+                                   org-capture-templates))))
+          (if tpl
+              (and (plist-get (nthcdr 5 tpl) :prepend) t)
+            (alist-get template orgx-capture-shell--builtin-prepend t)))))))
 
 (defun orgx-capture-shell--insertion-point (parent level end &optional prepend)
   "Return where a new child of the section at LEVEL belongs.
@@ -501,46 +614,66 @@ the first child; otherwise at the end, skipping trailing children tagged
             (pop children))
           pos)))))
 
-(defun orgx-capture-shell--locate (headline &optional prepend)
+(defun orgx-capture-shell--locate (headline &optional prepend datetree)
   "Find, creating as needed, the insertion point for entries under HEADLINE.
 HEADLINE is an outline path; each segment is searched among the
 descendants of the previous one.  Missing segments are created with the
-correct nesting.  Returns (LEVEL . POSITION) where LEVEL is the level of the
-parent heading (0 at top level) and POSITION is where the entry goes, per
+correct nesting.  When DATETREE is non-nil, locate or create today's
+date-tree entry under HEADLINE (or at top level when nil).  Returns
+\(LEVEL . POSITION) where LEVEL is the level of the parent heading (0 at
+top level) and POSITION is where the entry goes, per
 `orgx-capture-shell--insertion-point' and PREPEND.
 Must be called with the buffer widened."
   (let ((level 0)
         (beg (point-min))
         (end (point-max)))
-    (dolist (seg (orgx-capture-shell--headline-path headline))
-      (let ((found nil))
-        (goto-char beg)
-        (let ((continue (if (org-at-heading-p) t (outline-next-heading))))
-          (while (and (not found) continue (< (point) end))
-            (when (and (> (org-current-level) level)
-                       (string-equal (org-get-heading t t t t) seg))
-              (setq found (point)))
-            (setq continue (outline-next-heading))))
-        (if found
-            (progn
-              (goto-char found)
-              (setq level (org-current-level))
-              (setq beg found)
-              (org-end-of-subtree t t)
-              (setq end (point)))
-          (goto-char end)
-          (unless (bolp) (insert "\n"))
-          (setq beg (point))
-          (insert (make-string (1+ level) ?*) " " seg "\n")
-          (setq level (1+ level))
-          (setq end (point)))))
+    (seq-do
+     (lambda (seg)
+       (let ((found nil))
+         (goto-char beg)
+         (let ((continue (if (org-at-heading-p)
+                             t
+                           (outline-next-heading))))
+           (while (and (not found) continue (< (point) end))
+             (when (and (> (org-current-level) level)
+                        (string-equal (org-get-heading t t t t) seg))
+               (setq found (point)))
+             (setq continue (outline-next-heading))))
+         (if found
+             (progn
+               (goto-char found)
+               (setq level (org-current-level))
+               (setq beg found)
+               (org-end-of-subtree t t)
+               (setq end (point)))
+           (goto-char end)
+           (unless (bolp) (insert "\n"))
+           (setq beg (point))
+           (insert (make-string (1+ level) ?*) " " seg "\n")
+           (setq level (1+ level))
+           (setq end (point)))))
+     (orgx-capture-shell--headline-path headline))
+    (when datetree
+      (require 'org-datetree)
+      (require 'calendar)
+      (if (> level 0)
+          (progn
+            (goto-char beg)
+            (org-datetree-find-date-create (calendar-current-date) 'subtree-at-point))
+        (org-datetree-find-date-create (calendar-current-date)))
+      (setq beg (point))
+      (setq level (org-current-level))
+      (save-excursion
+        (org-end-of-subtree t t)
+        (setq end (point))))
     (cons level (orgx-capture-shell--insertion-point
                  (and (> level 0) beg) level end prepend))))
 
-(defun orgx-capture-shell--insert-entry (file headline entry-text &optional prepend)
+(defun orgx-capture-shell--insert-entry (file headline entry-text &optional prepend datetree)
   "Insert ENTRY-TEXT under HEADLINE in FILE, at the top if PREPEND.
-HEADLINE may be a nested outline path.  Headings in ENTRY-TEXT are
-re-leveled to be children of the target.  Returns a record
+HEADLINE may be a nested outline path.  When DATETREE is non-nil,
+file into today's date tree under HEADLINE.  Headings in ENTRY-TEXT
+are re-leveled to be children of the target.  Returns a record
 \(FILE MARKER-POS ENTRY-TEXT) for the undo ring."
   (let* ((expanded (expand-file-name file))
          (dir (file-name-directory expanded)))
@@ -553,7 +686,7 @@ re-leveled to be children of the target.  Returns a record
           (org-mode))
         (let ((rec (save-excursion
                      (org-with-wide-buffer
-                      (let* ((ctx (orgx-capture-shell--locate headline prepend))
+                      (let* ((ctx (orgx-capture-shell--locate headline prepend datetree))
                              (text (orgx-capture-shell--relevel entry-text (1+ (car ctx)))))
                         (goto-char (cdr ctx))
                         (unless (bolp) (insert "\n"))
@@ -600,12 +733,20 @@ description string."
       (setq file (car res))
       (when (or (null headline) (string-empty-p headline))
         (setq headline (cdr res)))))
-  (let* ((entry (orgx-capture-shell--format-entry text template))
+  (let* ((matched-tpl (or (orgx-capture-shell--find-template template)
+                          (and (not (eq template 'plain))
+                               (orgx-capture-shell--find-template-for-file
+                                file template))))
+         (target (nth 3 matched-tpl))
+         (datetree (and (consp target)
+                        (eq (car target) 'file+olp+datetree)
+                        (equal headline (orgx-capture-shell--target-headline target))))
+         (entry (orgx-capture-shell--format-entry text template file))
          (entry (if (and body (not (string-empty-p (string-trim body))))
                     (concat entry "\n" (string-trim-right body))
                   entry)))
     (orgx-capture-shell--insert-entry
-     file headline entry (orgx-capture-shell--resolve-prepend template file))
+     file headline entry (orgx-capture-shell--resolve-prepend template file) datetree)
     (when orgx-capture-shell--status
       (setq orgx-capture-shell--status 'success))
     (let* ((trimmed (string-trim entry))
@@ -979,7 +1120,13 @@ STATUS is `ready', `success', or `error'; it defaults to `ready'."
              (when orgx-capture-shell--status (setq orgx-capture-shell--status 'error))
              (format "Error: Target file must be an Org file (.org): %s" f))
             (t
-             (orgx-capture-shell--set-target exp (and h (not (string-empty-p h)) h) t)
+             (let ((headline
+                    (if colon
+                        (and h (not (string-empty-p h)) h)
+                      (if-let* ((tpl (orgx-capture-shell--find-template-for-file exp)))
+                          (orgx-capture-shell--target-headline (nth 3 tpl))
+                        orgx-capture-shell-current-headline))))
+               (orgx-capture-shell--set-target exp headline))
              (format "Target set to %s [%s]"
                      (file-name-nondirectory orgx-capture-shell-current-file)
                      (or orgx-capture-shell-current-headline "none")))))))
@@ -1469,7 +1616,9 @@ window.  If it is hidden or not active, display it in the bottom popup window."
           (h (completing-read "Headline (optional): "
                               (when (and f (file-regular-p f))
                                 (orgx-capture-shell--headline-paths f))
-                              nil nil)))
+                              nil nil
+                              (when-let* ((tpl (and f (orgx-capture-shell--find-template-for-file f))))
+                                (orgx-capture-shell--target-headline (nth 3 tpl))))))
      (list f h)))
   (unless (and file (stringp file) (not (string-empty-p (string-trim file))))
     (user-error "Target file must be specified"))
@@ -1480,7 +1629,15 @@ window.  If it is hidden or not active, display it in the bottom popup window."
       (user-error "Target file cannot be a directory: %s" exp))
     (unless (string-suffix-p ".org" exp)
       (user-error "Target file must be an Org file (.org): %s" exp))
-    (orgx-capture-shell--set-target exp headline)
+    (let ((target-h
+           (cond
+            ((and headline (not (string-empty-p (string-trim headline))))
+             headline)
+            ((null headline)
+             (when-let* ((tpl (orgx-capture-shell--find-template-for-file exp)))
+               (orgx-capture-shell--target-headline (nth 3 tpl))))
+            (t nil))))
+      (orgx-capture-shell--set-target exp target-h))
     (orgx-capture-shell--rename-buffer)
     (message "Target set to %s%s"
              (file-name-nondirectory orgx-capture-shell-current-file)
@@ -1506,22 +1663,24 @@ When TEMPLATE specifies a target file in `org-capture-templates' and
                                     (string-join (orgx-capture-shell--template-keys) ", "))))))
     (setq orgx-capture-shell-current-template canonical)
     (when orgx-capture-shell-sync-target-on-template
-      (when-let* ((entry (orgx-capture-shell--find-template canonical))
-                  (target (nth 3 entry)))
-        (when (consp target)
-          (let* ((type (car target))
-                 (raw-file (cadr target))
-                 (file (and (stringp raw-file)
-                            (expand-file-name raw-file (or (bound-and-true-p org-directory)
-                                                           default-directory))))
-                 (headline (pcase type
-                             ('file+headline (nth 2 target))
-                             ('file+olp (string-join (nthcdr 2 target)
-                                                    orgx-capture-shell-headline-separator))
-                             ('file+olp+datetree (nth 2 target))
-                             (_ nil))))
-            (when file
-              (orgx-capture-shell--set-target file headline t))))))
+      (if-let* ((entry (orgx-capture-shell--find-template canonical))
+                (target (nth 3 entry)))
+          (when (consp target)
+            (let* ((raw-file (cadr target))
+                   (file (and (stringp raw-file)
+                              (expand-file-name raw-file (or (bound-and-true-p org-directory)
+                                                             default-directory))))
+                   (headline (orgx-capture-shell--target-headline target)))
+              (when file
+                (orgx-capture-shell--set-target file headline))))
+        (when (and orgx-capture-shell-current-file
+                   (not (eq canonical 'plain)))
+          (when-let* ((entry (orgx-capture-shell--find-template-for-file
+                              orgx-capture-shell-current-file canonical))
+                      (target (nth 3 entry)))
+            (orgx-capture-shell--set-target
+             orgx-capture-shell-current-file
+             (orgx-capture-shell--target-headline target))))))
     (orgx-capture-shell--rename-buffer)
     (message "Template set to %s%s"
              canonical
