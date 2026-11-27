@@ -838,6 +838,11 @@ Other tests may leave `orgx-mode-turn-on' on the hook."
   "c in orgx-command-map leads to the capture submap."
   (should (eq orgx-capture-map (keymap-lookup orgx-command-map "c"))))
 
+(ert-deftest orgx-command-map-queue-capture-test ()
+  "q captures the current heading in agent-shell-queue."
+  (should (eq (keymap-lookup orgx-command-map "q")
+              'agent-shell-queue-org-capture-from-heading)))
+
 (ert-deftest orgx-command-map-no-capitals-test ()
   "No plain capital-letter keys are bound in orgx-command-map."
   (should-not (keymap-lookup orgx-command-map "W")))

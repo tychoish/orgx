@@ -58,7 +58,6 @@
 (declare-function org-annotate-file "org-annotate-file")
 (declare-function org-id-store-link "org-id")
 (declare-function consult-org-heading "consult")
-(declare-function agent-shell-queue-org-refile-from-heading "agent-shell-queue-org")
 (declare-function orgx-denote-setup-agenda-commands "orgx-denote")
 
 (declare-function orgx-capture "orgx-capture")
