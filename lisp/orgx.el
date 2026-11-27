@@ -242,6 +242,12 @@ Updates `orgx-local-notes-directory' and the associated Org paths."
                   (revert-buffer :ignore-auto :noconfirm))))
             (org-agenda-files))))
 
+;;;###autoload
+(defun orgx-agenda-redo-all ()
+  "Rebuild all agenda views across every live `org-agenda-mode' buffer."
+  (interactive)
+  (org-agenda-redo-all t))
+
 (defun orgx--ensure-agenda-file-buffer-mode (buf)
   "Ensure buffer BUF returned by `org-get-agenda-file-buffer' is in `org-mode'."
   (when (and (buffer-live-p buf)
