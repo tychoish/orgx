@@ -2,7 +2,7 @@
 #+author: tychoish
 #+language: en
 
-=orgx-refile-agent.el= adds agent-shell targets to ~org-refile~ (=C-c o w=, and =r= in the agenda via ~org-agenda-refile~).
+=orgx-refile-agent.el= adds agent-shell targets to ~org-refile~ (=C-c o r=, and =r= in the agenda via ~org-agenda-refile~).
 
 * Usage
 

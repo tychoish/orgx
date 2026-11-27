@@ -30,9 +30,11 @@
 (declare-function orgx-insert-date "orgx")
 (declare-function orgx-agenda-files-open "orgx")
 (declare-function orgx-agenda-files-reload "orgx")
+(declare-function orgx-agenda-redo-all "orgx")
 (declare-function orgx-agenda-untagged-in-file "orgx")
 (declare-function orgx-agenda-for-file "orgx")
 (declare-function org-agenda "org-agenda")
+(declare-function org-agenda-kill-all-agenda-buffers "org-agenda")
 (declare-function org-capture "org-capture")
 (declare-function consult-org-heading "consult")
 (declare-function agent-shell-queue-org-refile-from-heading "agent-shell-queue")
@@ -51,6 +53,12 @@
 (declare-function org-refile "org-refile")
 (autoload 'orgx-gist-export-private "orgx" nil t)
 (autoload 'orgx-gist-export-public "orgx" nil t)
+(autoload 'orgx-agenda-view "orgx" nil t)
+(autoload 'orgx-agenda-files-open "orgx" nil t)
+(autoload 'orgx-agenda-files-reload "orgx" nil t)
+(autoload 'orgx-agenda-redo-all "orgx" nil t)
+(autoload 'org-agenda-kill-all-agenda-buffers "org-agenda" nil t)
+(autoload 'org-refile "org-refile" nil t)
 (autoload 'orgx-capture-shell-transient "orgx-capture-shell" nil t)
 (autoload 'orgx-capture-shell-execute-command "orgx-capture-shell" nil t)
 (autoload 'org-annotate-file "org-annotate-file" nil t)
@@ -119,12 +127,23 @@
   "i" #'org-insert-link
   "n" #'org-annotate-file)
 
+(defvar-keymap orgx-agenda-map
+  :name "org-agenda"
+  :doc "Agenda commands under C-c o a (orgx-mode)."
+  "a" #'orgx-agenda-view
+  "o" #'orgx-agenda-files-open
+  "r" #'orgx-agenda-files-reload
+  "l" #'org-agenda
+  "s" #'org-save-all-org-buffers
+  "k" #'org-agenda-kill-all-agenda-buffers
+  "g" #'orgx-agenda-redo-all)
+
 (defvar-keymap orgx-command-map
   :name "org"
   :doc "Command keymap for orgx commands mounted under C-c o.")
 
 (keymap-set orgx-command-map "4" #'org-agenda)
-(keymap-set orgx-command-map "a" #'orgx-agenda-view)
+(keymap-set orgx-command-map "a" orgx-agenda-map)
 (keymap-set orgx-command-map "b" (cons "bulk" orgx-bulk-map))
 (keymap-set orgx-command-map "c" orgx-capture-map)
 (keymap-set orgx-command-map "d" #'orgx-insert-date)
@@ -139,11 +158,11 @@
 (keymap-set orgx-command-map "o" #'orgx-agenda-files-open)
 (keymap-set orgx-command-map "p" #'org-insert-property-drawer)
 (keymap-set orgx-command-map "q" #'agent-shell-queue-org-refile-from-heading)
-(keymap-set orgx-command-map "r" #'orgx-agenda-files-reload)
+(keymap-set orgx-command-map "r" #'org-refile)
 (keymap-set orgx-command-map "s" #'org-save-all-org-buffers)
 (keymap-set orgx-command-map "t" #'org-set-tags-command)
 (keymap-set orgx-command-map "u" (cons "untagged-in-file" #'orgx-agenda-untagged-in-file))
-(keymap-set orgx-command-map "w" #'org-refile)
+(keymap-set orgx-command-map "w" #'widen)
 (keymap-set orgx-command-map "x" #'orgx-capture-shell-execute-command)
 (keymap-set orgx-command-map "/" #'orgx-agenda-for-file)
 
